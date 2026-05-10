@@ -1,107 +1,133 @@
 """
 Data Customizer Module
-Handles dataset-level customizations including:
-- Deriving new variables based on user specifications
-- Merging with ADSL via left join by SUBJID
+Handles all dataset-level customizations:
+- LEFT JOIN ADSL onto ADRS for subject-level variables
+- Deriving new variables
 - Filtering and transformations
+Returns the FULL enriched dataset — column selection and dedup happen
+downstream in dash_app.generate_validation_report.
 """
 
-import pandas as pd
-import numpy as np
 import io
 import sys
+import pandas as pd
+import numpy as np
+
+MODEL = "claude-sonnet-4-6"
 
 
 class DataCustomizer:
     def __init__(self, claude_client=None, ai_enabled=False):
-        """Initialize data customizer with AI client"""
         self.claude_client = claude_client
-        self.ai_enabled = ai_enabled
-
-        # Derivation context tracking
+        self.ai_enabled    = ai_enabled
         self.derivation_context = {
-            'derivation_code': '',
+            'derivation_code':   '',
             'derived_variables': [],
-            'user_request': '',
-            'formulas': {},
-            'original_shape': None,
-            'processed_shape': None
+            'user_request':      '',
+            'formulas':          {},
+            'original_shape':    None,
+            'processed_shape':   None,
         }
+
+    # ── Validation ─────────────────────────────────────────────────────────────
 
     def validate_data_customization(self, data_customization):
         """Validate that data customization doesn't contain graph elements - LENIENT VERSION"""
         if not data_customization or not data_customization.strip():
             return {"valid": True, "issues": []}
-
-        # Graph-related terms that shouldn't be in data customization - REDUCED LIST
         graph_terms = [
             'plotly title', 'chart title', 'plot title', 'figure title',
             'axis label font', 'legend font', 'text font',
             'plot background', 'chart background', 'figure background',
             'plot layout', 'chart layout', 'figure layout',
-            'hover tooltip', 'plot annotation'
+            'hover tooltip', 'plot annotation',
         ]
+        issues = [t for t in graph_terms if t in data_customization.lower()]
+        return {"valid": not issues, "issues": issues}
 
-        text_lower = data_customization.lower()
-        found_issues = []
+    # ── Main entry point ───────────────────────────────────────────────────────
 
-        for term in graph_terms:
-            if term in text_lower:
-                found_issues.append(term)
+    def apply_data_customizations(self, sample_data, data_customization,
+                                   x_var, y_var, hbar_var,
+                                   adsl_data=None):
+        """Apply data customizations using AI — returns FULL enriched dataset.
 
-        return {
-            "valid": len(found_issues) == 0,
-            "issues": found_issues
-        }
+        Column selection and drop_duplicates are NOT done here.
+        They happen in generate_validation_report after the user picks columns.
 
-    def apply_data_customizations(self, sample_data, data_customization, x_var, y_var, hbar_var):
-        """Apply data customizations using AI to transform the dataset - ENHANCED with DERIVATION TRACKING"""
-
-        print(f"=== DATA CUSTOMIZATION DEBUG ===")
-        print(f"AI Enabled: {self.ai_enabled}")
-        print(f"Data customization provided: {bool(data_customization and data_customization.strip())}")
-        print(f"Data customization content: '{data_customization[:100]}...' " if data_customization else "None")
-
-        # Store original shape for context
+        Parameters
+        ----------
+        sample_data        : ADRS DataFrame (base dataset, many rows per subject)
+        data_customization : natural language instructions from the user
+        x_var, y_var, hbar_var : plot variable selections (used in prompt context)
+        adsl_data          : ADSL DataFrame for left-join merging (optional)
+        """
         self.derivation_context['original_shape'] = sample_data.shape
-        self.derivation_context['user_request'] = data_customization
+        self.derivation_context['user_request']   = data_customization
 
         if not data_customization or not data_customization.strip():
-            print("⚠ No data customization provided - returning original data")
             self.derivation_context['processed_shape'] = sample_data.shape
             return sample_data
 
         if not self.ai_enabled:
-            print("⚠ AI not enabled - returning original data")
             return sample_data
 
-        # Enhanced validation debugging
         data_validation = self.validate_data_customization(data_customization)
-        print(f"Data validation result: {data_validation}")
-
         if not data_validation["valid"]:
             print(f"⚠ Data validation failed: {data_validation['issues']}")
             return sample_data
 
+        # ── Dataset context for the prompt ─────────────────────────────────────
+        adrs_cols = list(sample_data.columns)
+        adsl_cols = list(adsl_data.columns) if adsl_data is not None else []
+
         data_info = {
-            'columns': list(sample_data.columns),
-            'shape': sample_data.shape,
-            'sample_values': {col: list(sample_data[col].dropna().unique()[:3]) for col in sample_data.columns[:8]}
+            'adrs_columns':  adrs_cols,
+            'adrs_shape':    sample_data.shape,
+            'adsl_columns':  adsl_cols,
+            'adsl_shape':    adsl_data.shape if adsl_data is not None else (0, 0),
+            'sample_values': {col: list(sample_data[col].dropna().unique()[:3])
+                              for col in sample_data.columns[:8]},
         }
 
-        print(f"Dataset info: {data_info['shape']} with columns: {data_info['columns'][:5]}...")
+        # Join key is always USUBJID (standard CDISC subject identifier)
+        join_key = 'USUBJID'
 
+        # ── Starter skeleton ───────────────────────────────────────────────────
+        # Always LEFT JOINs ADSL onto ADRS by USUBJID.
+        # Brings ALL ADSL columns so the AI can use any of them.
+        # Column selection and dedup happen downstream in generate_validation_report.
+        starter_code = (
+            f"# ── STARTER SKELETON (modify Step 3 only) ──────────────────────\n"
+            f"# Step 1: LEFT JOIN ADSL onto full ADRS by USUBJID\n"
+            f"# Deduplicate ADSL to one row per USUBJID before merging\n"
+            f"adsl_deduped = adsl_data.drop_duplicates(subset=['USUBJID'])\n"
+            f"working = recist_data.merge(adsl_deduped, on='USUBJID', how='left')\n\n"
+            f"# Step 2: apply user customizations here\n"
+            f"# Derive new variables, filter rows, calculate dates, etc.\n"
+            f"# ALL columns (ADRS + ADSL + derived) are kept — user selects in Step 2 of the UI.\n\n"
+            f"# Step 3: output — this line MUST remain exactly as-is\n"
+            f"processed_data = working\n"
+        )
+
+        # ── PROMPT ─────────────────────────────────────────────────────────────
         data_prompt = f"""Apply data customizations to a CDISC clinical trial dataset.
 
 SECTION 1: DATASET CONTEXT
-- Columns: {data_info['columns']}
-- Shape: {data_info['shape']}
+ADRS (recist_data) — base dataset, many rows per subject:
+- Shape: {data_info['adrs_shape']}
+- Columns: {data_info['adrs_columns']}
 - Sample values: {data_info['sample_values']}
 
-KEY VARIABLES TO PRESERVE:
-- Y-axis (subjects): {y_var}
-- X-axis (time): {x_var}
-- HBAR (duration): {hbar_var}
+ADSL (adsl_data) — subject-level, ONE row per subject:
+- Shape: {data_info['adsl_shape']}
+- Columns: {data_info['adsl_columns']}
+
+KEY VARIABLES FOR CONTEXT:
+- Join key (ADSL ← ADRS): USUBJID (always)
+- Y-axis (subjects): {y_var if y_var else 'not yet selected'}
+- X-axis (time): {x_var if x_var else 'not yet selected'}
+- HBAR (duration): {hbar_var if hbar_var else 'not yet selected'}
 
 SECTION 2: USER'S CUSTOMIZATION REQUEST
 {data_customization}
@@ -110,188 +136,144 @@ SECTION 3: DATA PREPARATION WORKFLOW
 Follow this strict workflow:
 
 1. VARIABLE EXISTENCE CHECK:
-   - User may request: "derive abc using (B - A) + 1"
-   - BEFORE deriving: Check if B and A exist in recist_data columns
-   - If missing: STOP and print error message listing missing variables
-   - If exists: Proceed with derivation
+   - BEFORE using any variable, check it exists in recist_data columns
+   - If missing: STOP and print error listing missing variables
 
 2. COLLECT ALL VARIABLES FIRST:
    - Identify ALL variables mentioned in user's request
-   - Create a list of required variables
-   - This includes: {y_var}, {x_var}, {hbar_var}, and any overlay variables
+   - This includes any variables mentioned in the user request and any overlay/derived variables
 
 3. VARIABLE LOCATION AND MERGE:
    - ADRS is the MAIN DRIVER dataset (recist_data is ADRS)
-   - Check which variables exist in recist_data
-   - For variables NOT in recist_data, check if they exist in ADSL
+   - For variables NOT in recist_data, check if they exist in ADSL (adsl_data)
    - If variable not in ADRS or ADSL: STOP and report missing variable
-   - Merge strategy: LEFT JOIN from ADSL using {y_var} as join key
-   - Only bring needed variables from ADSL (not all columns)
+   - Merge strategy: LEFT JOIN adsl_data onto recist_data on USUBJID (always)
+   - Deduplicate ADSL to ONE row per USUBJID BEFORE merging
+   - Select ONLY the needed ADSL columns before merging (never merge all columns)
+   - Row count after merge MUST equal recist_data row count
 
-4. KEEP ONLY REQUIRED VARIABLES:
-   - After merge and derivation, keep ONLY:
-     * {y_var} (Y-axis subject variable)
-     * {x_var} (X-axis time variable)
-     * {hbar_var} (HBAR duration variable)
-     * Any overlay variables mentioned by user
-     * Any derived variables created
-   - Drop ALL other columns
-   - Use: processed_data = processed_data[[list_of_kept_variables]]
+4. DERIVE NEW VARIABLES (if requested):
+   - Execute derivation formulas on the working DataFrame
+   - Print: "DERIVED: var_name = formula_description" for each new variable
 
-5. DERIVE NEW VARIABLES (if requested):
-   - Execute derivation formulas
-   - Add print statements documenting each derivation
-   - Print format: "DERIVED: var_name = formula_description"
+5. OUTPUT:
+   - Return ALL columns (original ADRS + any merged ADSL cols + all derived cols)
+   - Do NOT drop any columns — the user will select columns in the UI after this step
+   - Final line MUST be: processed_data = working
 
-6. VALIDATE FINAL DATASET:
-   - Confirm all required variables present
-   - Ensure {y_var}, {x_var}, {hbar_var} still exist
+6. VALIDATE:
+   - Print final shape and first 10 rows
 
 SECTION 4: CODE GENERATION REQUIREMENTS
-1. DataFrame name: recist_data (input) → processed_data (output)
-2. Apply ONLY data transformations (no visualization)
-3. Preserve required columns: {y_var}, {x_var}, {hbar_var}
-4. Use pandas operations: merge(), groupby(), fillna(), dropna(), etc.
-5. Handle datetime with .dt.days for date differences
-6. Add print statements for derived variables: "DERIVED: var = formula"
-7. Add comments explaining each step
-8. BEFORE final line, display dataset:
-   - print("\\n=== FINAL DATASET AFTER CUSTOMIZATION ===")
-   - print(f"Shape: {{processed_data.shape}}")
-   - print(f"Columns: {{list(processed_data.columns)}}")
-   - print("\\nFirst 10 rows:")
-   - print(processed_data.head(10))
-9. Final line MUST be: processed_data = [your_final_dataframe]
+1. DataFrame names: recist_data (ADRS input), adsl_data (ADSL input) → processed_data (output)
+2. Data transformations ONLY — no visualization, no column dropping
+3. Use pandas: merge(), groupby(), fillna(), dropna(), etc.
+4. Handle datetime with .dt.days for date differences
+5. Print "DERIVED: var = formula" for each derived variable
+6. Add comments explaining each step
+7. BEFORE final line:
+   print("\\n=== FINAL DATASET AFTER CUSTOMIZATION ===")
+   print(f"Shape: {{processed_data.shape}}")
+   print(f"Columns: {{list(processed_data.columns)}}")
+   print(processed_data.head(10))
+8. Final line MUST be: processed_data = working
+
+STARTER CODE — your output MUST follow this structure:
+```python
+{starter_code}
+```
 
 CRITICAL RULES:
-- Always check variable existence before using
-- ADRS is base, LEFT JOIN from ADSL
-- Join key is always {y_var} (subject identifier)
-- Keep only mentioned variables, drop everything else
-- For date differences: use .dt.days and add 1 for Day 1 = reference date
+- ADRS is base, LEFT JOIN from ADSL (never reverse)
+- Join key is always {y_var}
+- Deduplicate ADSL to one row per {y_var} before merging
+- Select only needed ADSL columns — never merge all ADSL columns
+- Row count must NOT increase after merge
+- Keep ALL columns in output — do NOT drop anything
+- For date differences: use .dt.days; add 1 when Day 1 = reference date
 
-Generate clean Python code implementing the user's request:"""
+Generate clean Python code:"""
 
         try:
-            print("Sending request to Claude AI...")
             message = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=3000,
-                temperature=0.1,
-                messages=[{"role": "user", "content": data_prompt}]
+                model=MODEL, max_tokens=3000, temperature=0.1,
+                messages=[{"role": "user", "content": data_prompt}],
             )
-
             data_transform_code = self._clean_code(message.content[0].text.strip())
-            print(f"AI generated {len(data_transform_code)} characters of code")
-            print(f"Generated code preview:\n{data_transform_code[:200]}...")
-
-            # STORE derivation code for later handover
             self.derivation_context['derivation_code'] = data_transform_code
 
-            # Execute data transformation with enhanced debugging
-            exec_globals = {
-                'pd': pd, 'np': np,
-                'recist_data': sample_data.copy(),
-                'print': print,  # Enable print statements in executed code
-            }
-
-            print("Executing data transformation code...")
-
-            # Capture print output to extract derived variable info
-            captured_output = io.StringIO()
-            old_stdout = sys.stdout
-            sys.stdout = captured_output
-
-            try:
-                exec(data_transform_code, exec_globals)
-            finally:
-                sys.stdout = old_stdout
-
-            # Parse captured output for derived variables
-            output_lines = captured_output.getvalue().split('\n')
-            for line in output_lines:
-                if line.startswith('DERIVED:'):
-                    parts = line.replace('DERIVED:', '').strip().split('=', 1)
-                    if len(parts) == 2:
-                        var_name = parts[0].strip()
-                        formula = parts[1].strip()
-                        self.derivation_context['derived_variables'].append(var_name)
-                        self.derivation_context['formulas'][var_name] = formula
-                        print(f"Captured derived variable: {var_name} = {formula}")
-                else:
-                    print(line)  # Print non-DERIVED lines normally
-
-            print(f"Available variables after execution: {list(exec_globals.keys())}")
-
-            if 'processed_data' in exec_globals:
-                processed = exec_globals['processed_data']
-                print(f"Data customization applied successfully!")
-                print(f"Original data: {len(sample_data)} rows × {len(sample_data.columns)} columns")
-                print(f"Processed data: {len(processed)} rows × {len(processed.columns)} columns")
-
-                # Store processed shape
-                self.derivation_context['processed_shape'] = processed.shape
-
-                # Verify required columns still exist
-                missing_cols = []
-                for col in [y_var, x_var, hbar_var]:
-                    if col not in processed.columns:
-                        missing_cols.append(col)
-
-                if missing_cols:
-                    print(f"Warning: Required columns missing after processing: {missing_cols}")
-                    print("Returning original data to prevent errors")
-                    return sample_data
-
-                return processed
-            else:
-                print("⚠ No 'processed_data' variable found in executed code")
-                print("Generated code did not create the required 'processed_data' variable")
-                return sample_data
+            return self._execute_and_capture(
+                data_transform_code, sample_data, adsl_data,
+                x_var, y_var, hbar_var, data_customization
+            )
 
         except Exception as e:
-            error_msg = str(e)
-            print(f"⚠ Data customization execution failed: {error_msg}")
-            print(f"Full error: {repr(e)}")
+            print(f"⚠ Data customization failed: {e}")
+            return sample_data
 
-            # Enhanced debugging attempt
-            try:
-                print("Attempting to fix data customization with AI...")
-                fixed_code = self._debug_data_customization(data_transform_code, error_msg, sample_data, data_customization, x_var, y_var, hbar_var)
-                print(f"AI debugging generated {len(fixed_code)} characters of fixed code")
+    # ── Execution ──────────────────────────────────────────────────────────────
 
-                # Try executing the fixed code
-                exec_globals = {
-                    'pd': pd, 'np': np,
-                    'recist_data': sample_data.copy(),
-                    'print': print,
-                }
-
-                print("Executing fixed code...")
-                exec(fixed_code, exec_globals)
-
-                if 'processed_data' in exec_globals:
-                    processed = exec_globals['processed_data']
-                    print(f"Fixed data customization applied: {len(sample_data)} → {len(processed)} rows")
-                    return processed
-                else:
-                    print("⚠ Fixed code also didn't produce 'processed_data', using original data")
-                    return sample_data
-
-            except Exception as debug_error:
-                print(f"⚠ Data customization debug also failed: {debug_error}")
-                print("Returning original data")
-                return sample_data
-
-    def _debug_data_customization(self, failed_code, error_message, sample_data, data_customization, x_var, y_var, hbar_var):
-        """Debug failed data customization code"""
-
-        data_info = {
-            'columns': list(sample_data.columns),
-            'shape': sample_data.shape,  ##store dimension using shape function
-            'sample_values': {col: list(sample_data[col].dropna().unique()[:3]) for col in sample_data.columns[:8]}
+    def _execute_and_capture(self, code, sample_data, adsl_data,
+                              x_var, y_var, hbar_var, original_request):
+        """Execute transformation code, capture DERIVED: output, retry once on failure."""
+        exec_globals = {
+            'pd': pd, 'np': np,
+            'recist_data': sample_data.copy(),
+            'adsl_data':   adsl_data.copy() if adsl_data is not None else pd.DataFrame(),
+            'print': print,
         }
 
+        captured   = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            exec(code, exec_globals)
+        except Exception as err:
+            sys.stdout = old_stdout
+            print(f"⚠ Execution failed: {err} — attempting AI fix...")
+            return self._retry_with_debug(
+                code, str(err), sample_data, adsl_data,
+                original_request, x_var, y_var, hbar_var
+            )
+        finally:
+            sys.stdout = old_stdout
+
+        # Parse DERIVED: lines from captured stdout
+        for line in captured.getvalue().splitlines():
+            if line.startswith('DERIVED:'):
+                parts = line.replace('DERIVED:', '').strip().split('=', 1)
+                if len(parts) == 2:
+                    var_name, formula = parts[0].strip(), parts[1].strip()
+                    self.derivation_context['derived_variables'].append(var_name)
+                    self.derivation_context['formulas'][var_name] = formula
+
+        processed = exec_globals.get('processed_data')
+        if processed is None:
+            print("⚠ Code did not produce 'processed_data' — using original.")
+            return sample_data
+
+        # Only validate columns that were actually specified (empty strings are skipped)
+        required = [c for c in [y_var, x_var, hbar_var] if c]
+        missing = [c for c in required if c not in processed.columns]
+        if missing:
+            print(f"⚠ Required columns missing after processing: {missing} — using original.")
+            return sample_data
+
+        self.derivation_context['processed_shape'] = processed.shape
+        print(f"✅ Data customization applied: {sample_data.shape} → {processed.shape}")
+        return processed
+
+    def _retry_with_debug(self, failed_code, error_msg, sample_data, adsl_data,
+                           original_request, x_var, y_var, hbar_var):
+        """Ask AI to fix failed code once using the original debug prompt, then give up."""
+        data_info = {
+            'columns':       list(sample_data.columns),
+            'shape':         sample_data.shape,
+            'sample_values': {col: list(sample_data[col].dropna().unique()[:3])
+                              for col in sample_data.columns[:8]},
+        }
+
+        # ── ORIGINAL DEBUG PROMPT — UNCHANGED ──────────────────────────────────
         debug_prompt = f"""Fix this failed data customization code for CDISC clinical trial data:
 
 FAILED DATA TRANSFORMATION CODE:
@@ -300,16 +282,22 @@ FAILED DATA TRANSFORMATION CODE:
 ```
 
 ERROR MESSAGE:
-{error_message}
+{error_msg}
 
 ORIGINAL USER REQUEST:
-{data_customization}
+{original_request}
 
 DATASET CONTEXT:
 - Columns: {data_info['columns']}
 - Shape: {data_info['shape']}
 - Sample values: {data_info['sample_values']}
 - Key variables: Y={y_var}, X={x_var}, HBAR={hbar_var}
+
+MERGE RULES (if merge is involved):
+- LEFT JOIN adsl_data onto recist_data on USUBJID (always, never reverse)
+- Deduplicate ADSL to one row per USUBJID before merging
+- Select only needed ADSL columns before merging
+- Row count must not increase after merge
 
 COMMON FIXES FOR DATETIME/TIMEDELTA ERRORS:
 - Use .dt.days instead of integer arithmetic on timedelta
@@ -319,90 +307,87 @@ COMMON FIXES FOR DATETIME/TIMEDELTA ERRORS:
 
 REQUIREMENTS:
 1. Fix the specific error mentioned above
-2. DataFrame name: recist_data (input) → processed_data (output)
+2. DataFrame names: recist_data (ADRS input), adsl_data (ADSL input) → processed_data (output)
 3. Apply only data transformations, no visualization
 4. Preserve required columns: {y_var}, {x_var}, {hbar_var}
-5. Handle datetime columns properly
+5. Keep ALL columns in output — do NOT drop columns
+6. Handle datetime columns properly
 
 Generate ONLY the corrected Python code:"""
 
         try:
             message = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=3000,
-                temperature=0.1,
-                messages=[{"role": "user", "content": debug_prompt}]
+                model=MODEL, max_tokens=3000, temperature=0.1,
+                messages=[{"role": "user", "content": debug_prompt}],
             )
+            fixed_code = self._clean_code(message.content[0].text.strip())
 
-            return self._clean_code(message.content[0].text.strip())
-
+            exec_globals = {
+                'pd': pd, 'np': np,
+                'recist_data': sample_data.copy(),
+                'adsl_data':   adsl_data.copy() if adsl_data is not None else pd.DataFrame(),
+                'print': print,
+            }
+            exec(fixed_code, exec_globals)
+            processed = exec_globals.get('processed_data')
+            if processed is not None:
+                print(f"✅ AI fix applied: {sample_data.shape} → {processed.shape}")
+                return processed
         except Exception as e:
-            print(f"AI data customization debug failed: {e}")
-            # Return a simple passthrough if debugging fails
-            return "processed_data = recist_data.copy()"
+            print(f"⚠ AI fix also failed: {e}")
+
+        print("Returning original data.")
+        return sample_data
+
+    # ── Reporting ──────────────────────────────────────────────────────────────
 
     def get_validation_report(self, x_var, y_var, hbar_var, processed_data):
         """Generate validation report for user approval"""
-        report = {
-            'original_shape': self.derivation_context.get('original_shape', 'N/A'),
-            'processed_shape': self.derivation_context.get('processed_shape', processed_data.shape),
-            'user_request': self.derivation_context.get('user_request', 'No customization'),
-            'derivation_code': self.derivation_context.get('derivation_code', ''),
-            'derived_variables': self.derivation_context.get('derived_variables', []),
-            'formulas': self.derivation_context.get('formulas', {}),
+        dc = self.derivation_context
+        return {
+            'original_shape':    dc.get('original_shape', 'N/A'),
+            'processed_shape':   dc.get('processed_shape',
+                                        processed_data.shape if processed_data is not None else None),
+            'user_request':      dc.get('user_request', 'No customization'),
+            'derivation_code':   dc.get('derivation_code', ''),
+            'derived_variables': dc.get('derived_variables', []),
+            'formulas':          dc.get('formulas', {}),
             'data_snapshot': {
                 'first_5': processed_data.head(5).to_dict() if processed_data is not None else {},
                 'columns': list(processed_data.columns) if processed_data is not None else [],
-                'dtypes': {col: str(dtype) for col, dtype in processed_data.dtypes.items()} if processed_data is not None else {}
+                'dtypes':  {col: str(dtype) for col, dtype in processed_data.dtypes.items()}
+                           if processed_data is not None else {},
             },
-            'variables_for_plot': {
-                'y_axis': y_var,
-                'x_axis': x_var,
-                'hbar': hbar_var
-            }
+            'variables_for_plot': {'y_axis': y_var, 'x_axis': x_var, 'hbar': hbar_var},
         }
-        return report
 
     def filter_data_to_plot_variables(self, data, required_vars, additional_vars=None):
         """Filter dataset to keep only variables needed for plotting"""
         if data is None:
             return None
-
-        # Collect all variables to keep
-        vars_to_keep = set(required_vars)
-
-        if additional_vars:
-            if isinstance(additional_vars, str):
-                vars_to_keep.add(additional_vars)
-            elif isinstance(additional_vars, (list, tuple)):
-                vars_to_keep.update(additional_vars)
-
-        # Filter to only existing columns
-        available_cols = set(data.columns)
-        cols_to_keep = list(vars_to_keep.intersection(available_cols))
-
-        if not cols_to_keep:
-            print("Warning: No matching columns found for filtering")
+        keep = set(required_vars)
+        if isinstance(additional_vars, str):
+            keep.add(additional_vars)
+        elif isinstance(additional_vars, (list, tuple)):
+            keep.update(additional_vars)
+        cols = list(keep.intersection(data.columns))
+        if not cols:
+            print("⚠ No matching columns found for filtering.")
             return data
-
-        filtered_data = data[cols_to_keep].copy()
-        print(f"Filtered data from {len(data.columns)} to {len(filtered_data.columns)} columns")
-        print(f"Kept columns: {cols_to_keep}")
-
-        return filtered_data
+        filtered = data[cols].copy()
+        print(f"Filtered: {len(data.columns)} → {len(filtered.columns)} columns kept: {cols}")
+        return filtered
 
     def _clean_code(self, generated_code):
         """Simple code cleaning"""
-        # Remove markdown code blocks
         if '```python' in generated_code:
             start = generated_code.find('```python') + 9
-            end = generated_code.find('```', start)
+            end   = generated_code.find('```', start)
             if end > start:
                 return generated_code[start:end].strip()
         elif '```' in generated_code:
             start = generated_code.find('```') + 3
-            end = generated_code.find('```', start)
+            end   = generated_code.find('```', start)
             if end > start:
                 return generated_code[start:end].strip()
-
         return generated_code.strip()

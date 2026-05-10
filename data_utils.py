@@ -1,97 +1,67 @@
+"""
+Data Utils — CDISC dataset loader.
+"""
+
 import pandas as pd
-import os
 from pathlib import Path
 
-# CDISC datasets directory
 BASE_DIR = Path("C:/Users/sripa/Desktop/python_test/code_agent")
 
-def load_cdisc_data(dataset_name):
-    """Load CDISC dataset for swimmer plots"""
-    file_mapping = {
-        "ADSL": "ADSL.csv",
-        "ADRS": "ADRS_ONCO.csv", 
-        "ADTTE": "ADTTE_ONCO.csv",
-        "ADTR": "ADTR_ONCO.csv"
-    }
-    
-    if dataset_name not in file_mapping:
-        raise ValueError(f"Unknown CDISC dataset: {dataset_name}")
-    
-    file_path = BASE_DIR / file_mapping[dataset_name]
-    print(f"Loading CDISC {dataset_name} from: {file_path}")
-    
+_FILE_MAP = {
+    "ADSL":  "ADSL.csv",
+    "ADRS":  "ADRS_ONCO.csv",
+    "ADTTE": "ADTTE_ONCO.csv",
+    "ADTR":  "ADTR_ONCO.csv",
+}
+
+
+def load_cdisc_data(dataset_name: str) -> pd.DataFrame | None:
+    """Load a named CDISC dataset; returns None on failure."""
+    filename = _FILE_MAP.get(dataset_name)
+    if not filename:
+        raise ValueError(f"Unknown dataset '{dataset_name}'. Available: {list(_FILE_MAP)}")
+
+    path = BASE_DIR / filename
+    if not path.exists():
+        print(f"❌ File not found: {path}")
+        return None
+
     try:
-        if not file_path.exists():
-            print(f"File not found: {file_path}")
-            return None
-        
-        df = pd.read_csv(file_path, encoding='utf-8')
-        
+        df = pd.read_csv(path, encoding='utf-8')
         if df.empty:
-            print(f"Warning: {dataset_name} file is empty")
+            print(f"⚠ {dataset_name} is empty.")
             return None
-            
-        print(f"✅ Loaded {dataset_name}: {len(df)} rows × {len(df.columns)} columns")
+        print(f"✅ {dataset_name}: {df.shape[0]} rows × {df.shape[1]} columns")
         return df
-        
-        
     except Exception as e:
-        print(f"❌ Error loading {dataset_name}: {str(e)}")
+        print(f"❌ Error loading {dataset_name}: {e}")
         return None
 
 
-def get_cdisc_datasets():
-    """Return available CDISC datasets for swimmer plots"""
+def get_cdisc_datasets() -> dict:
     return {
-        'ADSL': {
-            'description': 'Subject-level data (baseline characteristics)',
-            'file': 'ADSL.csv'
-        },
-        'ADRS': {
-            'description': 'Response data (tumor assessments over time)',
-            'file': 'ADRS_ONCO.csv'
-        },
-        'ADTTE': {
-            'description': 'Time-to-event data (survival, progression)',
-            'file': 'ADTTE_ONCO.csv'
-        },
-        'ADTR': {
-            'description': 'Tumor response data (target lesions)',
-            'file': 'ADTR_ONCO.csv'
-        }
+        'ADSL':  {'description': 'Subject-level data (baseline characteristics)', 'file': 'ADSL.csv'},
+        'ADRS':  {'description': 'Response data (tumor assessments over time)',    'file': 'ADRS_ONCO.csv'},
+        'ADTTE': {'description': 'Time-to-event data (survival, progression)',     'file': 'ADTTE_ONCO.csv'},
+        'ADTR':  {'description': 'Tumor response data (target lesions)',           'file': 'ADTR_ONCO.csv'},
     }
 
-def check_cdisc_availability():
-    """Check which CDISC files are available"""
-    datasets = get_cdisc_datasets()
+
+def check_cdisc_availability() -> dict:
+    """Check which CDISC files are present and readable."""
     availability = {}
-    
-    for dataset_name, info in datasets.items():
-        file_path = BASE_DIR / info['file']
+    for name, info in get_cdisc_datasets().items():
         try:
-            if file_path.exists():
-                # Quick test read
-                test_df = pd.read_csv(file_path, nrows=1)
-                availability[dataset_name] = not test_df.empty
-            else:
-                availability[dataset_name] = False
-        except:
-            availability[dataset_name] = False
-            
-        status = "✅ Available" if availability[dataset_name] else "❌ Not available"
-        print(f"{dataset_name}: {status}")
-    
+            path = BASE_DIR / info['file']
+            availability[name] = path.exists() and not pd.read_csv(path, nrows=1).empty
+        except Exception:
+            availability[name] = False
+        print(f"{name}: {'✅ Available' if availability[name] else '❌ Not available'}")
     return availability
 
-# Simplified loader functions
-def load_adsl():
-    return load_cdisc_data("ADSL")
 
-def load_adrs():
-    return load_cdisc_data("ADRS") 
-
-def load_adtte():
-    return load_cdisc_data("ADTTE")
-
-def load_adtr():
-    return load_cdisc_data("ADTR")
+# Convenience loaders
+def load_adsl():  return load_cdisc_data("ADSL")
+def load_adrs():  return load_cdisc_data("ADRS")
+def load_adtte(): return load_cdisc_data("ADTTE")
+def load_adtr():  return load_cdisc_data("ADTR")

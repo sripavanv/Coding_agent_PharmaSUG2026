@@ -82,37 +82,71 @@ header = dbc.Navbar(
     className="mb-3"
 )
 
-# Sidebar
+# Sidebar — width=2
 sidebar = dbc.Col([
-    html.H6("CDISC Data", className="mb-2", style={'fontSize': '13px'}),
+    html.H6("CDISC Data", className="mb-2", style={'fontSize': '12px'}),
 
     dbc.Card([
         dbc.CardBody([
-            html.P("ADSL Dataset", className="text-primary mb-1", style={'fontSize': '12px', 'fontWeight': 'bold'}),
+            html.P("ADSL", className="text-primary mb-1", style={'fontSize': '11px', 'fontWeight': 'bold'}),
             html.P([
-                html.Strong("Rows: ", style={'fontSize': '11px'}), html.Span(f"{len(ADSL_DATA):,}", style={'fontSize': '11px'}),
+                html.Strong("Rows: ", style={'fontSize': '10px'}), html.Span(f"{len(ADSL_DATA):,}", style={'fontSize': '10px'}),
                 html.Br(),
-                html.Strong("Variables: ", style={'fontSize': '11px'}), html.Span(f"{len(ADSL_DATA.columns):,}", style={'fontSize': '11px'})
-            ], className="mb-0", style={'fontSize': '11px'})
-        ], style={'padding': '8px'})
+                html.Strong("Vars: ", style={'fontSize': '10px'}), html.Span(f"{len(ADSL_DATA.columns):,}", style={'fontSize': '10px'})
+            ], className="mb-0")
+        ], style={'padding': '6px'})
+    ], className="mb-1"),
+
+    dbc.Card([
+        dbc.CardBody([
+            html.P("ADRS", className="text-primary mb-1", style={'fontSize': '11px', 'fontWeight': 'bold'}),
+            html.P([
+                html.Strong("Rows: ", style={'fontSize': '10px'}), html.Span(f"{len(ADRS_DATA):,}", style={'fontSize': '10px'}),
+                html.Br(),
+                html.Strong("Vars: ", style={'fontSize': '10px'}), html.Span(f"{len(ADRS_DATA.columns):,}", style={'fontSize': '10px'})
+            ], className="mb-0")
+        ], style={'padding': '6px'})
     ], className="mb-2"),
 
+    html.Hr(style={'margin': '6px 0'}),
+
+    # ── Filter box: ADSL ─────────────────────────────
     dbc.Card([
         dbc.CardBody([
-            html.P("ADRS Dataset", className="text-primary mb-1", style={'fontSize': '12px', 'fontWeight': 'bold'}),
-            html.P([
-                html.Strong("Rows: ", style={'fontSize': '11px'}), html.Span(f"{len(ADRS_DATA):,}", style={'fontSize': '11px'}),
-                html.Br(),
-                html.Strong("Variables: ", style={'fontSize': '11px'}), html.Span(f"{len(ADRS_DATA.columns):,}", style={'fontSize': '11px'})
-            ], className="mb-0", style={'fontSize': '11px'})
-        ], style={'padding': '8px'})
+            html.P("Filter ADSL", className="text-secondary mb-1",
+                   style={'fontSize': '10px', 'fontWeight': 'bold'}),
+            dcc.Dropdown(
+                id='adsl-filter-var',
+                options=[{'label': c, 'value': c} for c in ADSL_DATA.columns],
+                placeholder="Select variable...",
+                clearable=True,
+                style={'fontSize': '10px'}
+            ),
+            html.Div(id='adsl-filter-values', className="mt-1")
+        ], style={'padding': '6px'})
+    ], className="mb-1"),
+
+    # ── Filter box: ADRS ─────────────────────────────
+    dbc.Card([
+        dbc.CardBody([
+            html.P("Filter ADRS", className="text-secondary mb-1",
+                   style={'fontSize': '10px', 'fontWeight': 'bold'}),
+            dcc.Dropdown(
+                id='adrs-filter-var',
+                options=[{'label': c, 'value': c} for c in ADRS_DATA.columns],
+                placeholder="Select variable...",
+                clearable=True,
+                style={'fontSize': '10px'}
+            ),
+            html.Div(id='adrs-filter-values', className="mt-1")
+        ], style={'padding': '6px'})
     ], className="mb-2"),
 
     html.Div(id='dataset-status-sidebar')
 
-], width=3, style={
+], width=2, style={
     'backgroundColor': '#F5F5F5',
-    'padding': '15px',
+    'padding': '10px',
     'minHeight': '100vh'
 })
 
@@ -126,6 +160,16 @@ main_panel = dbc.Col([
     dcc.Store(id='execution-result-store', storage_type='memory'),
     dcc.Store(id='conversation-history-store', storage_type='memory', data=[]),
     dcc.Store(id='converted-code-store', storage_type='memory'),
+
+    # Global spinner — visible whenever any long operation is running
+    dcc.Loading(
+        id="global-spinner",
+        type="circle",
+        color="#0d6efd",
+        fullscreen=True,
+        style={"backgroundColor": "rgba(255,255,255,0.6)"},
+        children=html.Div(id="spinner-trigger", style={"display": "none"})
+    ),
 
     # Main content area with tabs
     dcc.Tabs(id='main-tabs', value='data-tab', children=[
@@ -163,7 +207,7 @@ main_panel = dbc.Col([
                 dbc.Row([
                     dbc.Col([
                         html.Label("Y-axis (Subjects):", style={'fontSize': '12px'}),
-                        dcc.Dropdown(id='y-variable-dropdown', placeholder="Select subject...", className="mb-2", style={'fontSize': '12px'})
+                        dcc.Dropdown(id='y-variable-dropdown', placeholder="Select subject ID...", className="mb-2", style={'fontSize': '12px'})
                     ], width=4),
                     dbc.Col([
                         html.Label("X-axis (Time):", style={'fontSize': '12px'}),
@@ -185,6 +229,20 @@ main_panel = dbc.Col([
                 ),
                 html.P("These variables will be included in the unique dataset passed to the graph",
                        style={'fontSize': '11px', 'color': '#6c757d', 'marginBottom': '10px'}),
+
+                html.Label("Overlay Marker (Optional):", style={'fontSize': '12px', 'marginTop': '2px'}),
+                dcc.Dropdown(
+                    id='overlay-marker-dropdown',
+                    placeholder="Select overlay variable (scatter on X-axis timepoints)...",
+                    multi=False,
+                    clearable=True,
+                    className="mb-1",
+                    style={'fontSize': '12px'}
+                ),
+                html.P(
+                    "Character string variable — plotted as scatter markers at X-axis timepoints, aligned to Y-axis subjects.",
+                    style={'fontSize': '11px', 'color': '#6c757d', 'marginBottom': '10px'}
+                ),
 
                 dbc.Button("Generate Validation Report", id='generate-validation-btn', color="primary", size="sm", className="w-100 mb-2", style={'fontSize': '12px'}),
 
@@ -258,7 +316,7 @@ main_panel = dbc.Col([
                             style={'width': '100%', 'height': '60px', 'fontSize': '12px'},
                             className="form-control"
                         )
-                    ], width=9),
+                    ], width=10),
                     dbc.Col([
                         dbc.Button("Send Request", id='send-dialogue-btn', color="primary", size="sm", className="w-100 mb-2", style={'fontSize': '12px'}),
                         dbc.Button("Clear History", id='clear-dialogue-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
@@ -315,55 +373,77 @@ app.layout = dbc.Container([
      Output('x-variable-dropdown', 'options'),
      Output('hbar-variable-dropdown', 'options'),
      Output('keep-variables-dropdown', 'options'),
+     Output('overlay-marker-dropdown', 'options'),
      Output('dataset-status-sidebar', 'children')],
     Input('customized-data-store', 'data')
 )
 def update_variable_choices(customized_data):
-    """Update dropdown options based on customized data"""
+    """Update dropdown options based on customized data.
+    Y-axis is restricted to SUBJID / USUBJID (subject identifier columns only).
+    """
     if customized_data is None or len(customized_data) == 0:
-        empty_options = []
+        empty = []
         status = html.P("No data available", style={'color': 'red', 'marginTop': '10px', 'fontSize': '9px'})
-        return empty_options, empty_options, empty_options, empty_options, status
+        return empty, empty, empty, empty, empty, status
 
     df = pd.DataFrame(customized_data)
-    options = [{'label': col, 'value': col} for col in df.columns]
+    all_options = [{'label': col, 'value': col} for col in df.columns]
 
-    # No status display needed
-    status = html.Div()
+    # Y-axis: ONLY SUBJID or USUBJID — no fallback, must be a subject identifier
+    subj_cols = [c for c in df.columns if c in ('SUBJID', 'USUBJID')]
+    y_options = [{'label': c, 'value': c} for c in subj_cols]
+    # If neither present the dropdown will be empty — user sees no valid choice
+    # and cannot proceed, which is the correct behaviour
 
-    return options, options, options, options, status
+    # Overlay: character/object columns make sense as scatter category variable
+    # (exclude numeric-only cols but keep all for flexibility)
+    overlay_options = [{'label': col, 'value': col} for col in df.columns]
+
+    return y_options, all_options, all_options, all_options, overlay_options, html.Div()
 
 # Apply data customization
 @callback(
     [Output('customized-data-store', 'data'),
      Output('customization-status', 'children'),
-     Output('dataset-preview-table', 'children')],
+     Output('dataset-preview-table', 'children'),
+     Output('spinner-trigger', 'children', allow_duplicate=True)],
     Input('apply-customization-btn', 'n_clicks'),
     [State('data-customization-textarea', 'value'),
      State('original-data-store', 'data')],
     prevent_initial_call=True
 )
 def apply_customization(n_clicks, customization_text, original_data):
-    """Apply dataset customization using AI"""
+    """Apply dataset customization using AI.
+    Runs on full ADRS + ADSL with no column filtering.
+    ALL columns (original + merged + derived) are returned so the
+    user can see and select derived columns in Step 2 dropdowns.
+    Column selection and drop_duplicates happen in generate_validation_report.
+    """
     if n_clicks is None:
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     original_df = pd.DataFrame(original_data)
 
     if not customization_text or not customization_text.strip():
-        return original_data, dbc.Alert("No customization applied - using original dataset", color="info"), dash.no_update
+        return original_data, dbc.Alert("No customization applied - using original dataset", color="info"), dash.no_update, dash.no_update
 
     if not generator.ai_enabled:
-        return original_data, dbc.Alert("AI not available. Please set ANTHROPIC_API_KEY environment variable.", color="danger"), dash.no_update
+        return original_data, dbc.Alert("AI not available. Please set ANTHROPIC_API_KEY environment variable.", color="danger"), dash.no_update, dash.no_update
 
     try:
-        # Use the same function from Shiny app
-        processed_df = apply_dataset_customization(original_df, customization_text)
+        processed_df = generator.data_customizer.apply_data_customizations(
+            sample_data=original_df,
+            data_customization=customization_text,
+            x_var='',
+            y_var='',
+            hbar_var='',
+            adsl_data=ADSL_DATA,
+        )
 
         if processed_df is not None and len(processed_df) > 0:
             status = dbc.Alert([
                 html.I(className="bi bi-check-circle-fill me-2"),
-                f"Customization applied successfully! Dataset: {len(original_df)} → {len(processed_df)} rows, {len(processed_df.columns)} columns"
+                f"Customization applied! Dataset: {len(original_df)} → {len(processed_df)} rows, {len(processed_df.columns)} columns. Now select your plot variables in Step 2."
             ], color="success")
 
             # Create table preview with pagination - 10 rows per page, all columns
@@ -378,16 +458,16 @@ def apply_customization(n_clicks, customization_text, original_data):
                     size='sm',
                     style={'fontSize': '10px', 'overflowX': 'auto'}
                 ),
-                html.P(f"Showing 10 of {len(processed_df)} rows. Scroll horizontally to see all {len(processed_df.columns)} columns.",
+                html.P(f"Showing 10 of {len(processed_df)} rows — includes all original, merged, and derived columns.",
                        style={'fontSize': '11px', 'color': '#6c757d', 'marginTop': '5px'})
             ])
 
-            return processed_df.to_dict('records'), status, table_preview
+            return processed_df.to_dict('records'), status, table_preview, dash.no_update
         else:
-            return original_data, dbc.Alert("Customization failed or resulted in empty dataset. Using original data.", color="warning"), dash.no_update
+            return original_data, dbc.Alert("Customization failed or resulted in empty dataset. Using original data.", color="warning"), dash.no_update, dash.no_update
 
     except Exception as e:
-        return original_data, dbc.Alert(f"Customization error: {str(e)}", color="danger"), dash.no_update
+        return original_data, dbc.Alert(f"Customization error: {str(e)}", color="danger"), dash.no_update, dash.no_update
 
 # Reset to original data
 @callback(
@@ -425,73 +505,139 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
     if n_clicks is None or not all([y_var, x_var, hbar_var]):
         return html.Div("Please select all required variables first", style={'color': 'orange', 'fontSize': '10px'}), None, True, dash.no_update
 
+    # Hard guard — Y must be a recognised subject identifier
+    if y_var not in ('SUBJID', 'USUBJID'):
+        return dbc.Alert(
+            f"Y-axis must be SUBJID or USUBJID — '{y_var}' is not a valid subject identifier.",
+            color="danger"
+        ), None, True, dash.no_update
+
     df = pd.DataFrame(customized_data)
 
-    # Create the keep columns list (required + additional)
+    # Create the keep columns list (required + additional selected by user)
     keep_columns = [y_var, x_var, hbar_var]
     if keep_vars:
         keep_columns.extend(keep_vars)
-    # Remove duplicates while preserving order
     keep_columns = list(dict.fromkeys(keep_columns))
+
+    # Also retain any derived columns that exist in df but were not in the
+    # original ADRS schema — these were created by the data customizer and
+    # must survive so the user can see and select them in the dropdowns.
+    original_adrs_cols = set(ADRS_DATA.columns)
+    derived_cols = [c for c in df.columns
+                    if c not in original_adrs_cols and c not in keep_columns]
+    final_columns = keep_columns + derived_cols
 
     # Perform unique operation on the dataset
     original_len = len(df)
-    unique_df = df[keep_columns].drop_duplicates()
+    unique_df = df[final_columns].drop_duplicates()
     unique_len = len(unique_df)
 
     print(f"Dataset after unique: {original_len} -> {unique_len} rows, keeping columns: {keep_columns}")
 
-    # Get validation report from generator
+    # ── Run data_validator standards checks against the processed data ──────────
+    validation = generator.data_validator.validate_all(
+        unique_df, x_var, y_var, hbar_var
+    )
+    has_errors   = not validation["valid"]
+    errors       = validation["errors"]
+    warnings     = validation["warnings"]
+
+    # ── Get derivation metadata from customizer ────────────────────────────────
     report = generator.get_validation_report(x_var, y_var, hbar_var, unique_df)
 
-    # Build validation report display
+    # ── Build combined validation report display ───────────────────────────────
+
+    # Section 1 — data summary
+    data_summary = html.Div([
+        html.Strong("Data Summary:", style={'fontSize': '12px'}),
+        html.P(f"Original Records: {original_len:,} → Unique Records: {unique_len:,}", style={'fontSize': '11px'}),
+        html.P(f"Unique Subjects: {unique_df[y_var].nunique() if y_var in unique_df.columns else 'N/A'}", style={'fontSize': '11px'}),
+        html.P(f"Columns in plot dataset: {', '.join(final_columns)}", style={'fontSize': '11px'})
+    ], className="mb-2")
+
+    # Section 2 — variable selections
+    var_summary = html.Div([
+        html.Strong("Variables Selected for Plot:", style={'fontSize': '12px'}),
+        html.Ul([
+            html.Li(f"Y-axis (Subjects): {y_var}", style={'fontSize': '11px'}),
+            html.Li(f"X-axis (Time): {x_var}", style={'fontSize': '11px'}),
+            html.Li(f"HBAR (Duration): {hbar_var}", style={'fontSize': '11px'})
+        ])
+    ], className="mb-2")
+
+    # Section 3 — standards checks (errors + warnings)
+    if errors:
+        error_block = html.Div([
+            html.Strong("❌ Standards Violations — must fix before generating:", style={'fontSize': '12px', 'color': '#dc3545'}),
+            html.Ul([html.Li(e, style={'fontSize': '11px', 'color': '#dc3545'}) for e in errors])
+        ], className="mb-2")
+    else:
+        error_block = html.Div(
+            "✅ All standards checks passed.",
+            style={'fontSize': '11px', 'color': '#198754', 'marginBottom': '8px'}
+        )
+
+    if warnings:
+        warning_block = html.Div([
+            html.Strong("⚠ Warnings (can still generate):", style={'fontSize': '12px', 'color': '#856404'}),
+            html.Ul([html.Li(w, style={'fontSize': '11px', 'color': '#856404'}) for w in warnings])
+        ], className="mb-2")
+    else:
+        warning_block = html.Div()
+
+    # Section 4 — approve/edit buttons
+    # Approve is disabled if there are standards errors
+    action_row = dbc.Row([
+        dbc.Col([
+            dbc.Button(
+                "Approve & Continue",
+                id='approve-variables-btn',
+                color="success" if not has_errors else "secondary",
+                size="sm",
+                className="w-100",
+                disabled=has_errors,
+                style={'fontSize': '12px'}
+            )
+        ], width=6),
+        dbc.Col([
+            dbc.Button("Edit Variables", id='edit-variables-btn', color="secondary", size="sm", className="w-100", style={'fontSize': '12px'})
+        ], width=6)
+    ])
+
+    header_color = "danger" if has_errors else ("warning" if warnings else "success")
+    header_text  = (
+        "Validation Report — Fix errors before continuing" if has_errors
+        else ("Validation Report — Warnings present, review before continuing" if warnings
+              else "Validation Report — All checks passed")
+    )
+
     report_display = dbc.Card([
         dbc.CardBody([
-            html.H6("Validation Report - Please Review", className="text-warning mb-2", style={'fontSize': '13px'}),
-
-            html.Div([
-                html.Strong("Data Summary:", style={'fontSize': '12px'}),
-                html.P(f"Original Records: {original_len:,} → Unique Records: {unique_len:,}", style={'fontSize': '11px'}),
-                html.P(f"Unique Subjects: {unique_df[y_var].nunique() if y_var in unique_df.columns else 'N/A'}", style={'fontSize': '11px'}),
-                html.P(f"Kept Columns: {', '.join(keep_columns)}", style={'fontSize': '11px'})
-            ], className="mb-2"),
-
-            html.Div([
-                html.Strong("Variables Selected for Plot:", style={'fontSize': '12px'}),
-                html.Ul([
-                    html.Li(f"Y-axis (Subjects): {y_var}", style={'fontSize': '11px'}),
-                    html.Li(f"X-axis (Time): {x_var}", style={'fontSize': '11px'}),
-                    html.Li(f"HBAR (Duration): {hbar_var}", style={'fontSize': '11px'})
-                ], style={'fontSize': '11px'})
-            ], className="mb-2"),
-
-            dbc.Row([
-                dbc.Col([
-                    dbc.Button("Approve & Continue", id='approve-variables-btn', color="success", size="sm", className="w-100", style={'fontSize': '12px'})
-                ], width=6),
-                dbc.Col([
-                    dbc.Button("Edit Variables", id='edit-variables-btn', color="secondary", size="sm", className="w-100", style={'fontSize': '12px'})
-                ], width=6)
-            ])
+            html.H6(header_text, className=f"text-{header_color} mb-2", style={'fontSize': '13px'}),
+            data_summary,
+            var_summary,
+            error_block,
+            warning_block,
+            action_row
         ], style={'padding': '10px'})
     ], color="light", className="mb-2")
 
-    # Return the unique dataset to replace customized data
-    return report_display, report, True, unique_df.to_dict('records')
+    # Enable Generate button only if no standards errors
+    return report_display, report, has_errors, unique_df.to_dict('records')
 
-# Handle approval
+# Handle approval — button already enabled by validate step if no errors
+# This callback just gives visual confirmation
 @callback(
-    [Output('validation-report-display', 'children', allow_duplicate=True),
-     Output('generate-code-btn', 'disabled', allow_duplicate=True)],
+    Output('validation-report-display', 'children', allow_duplicate=True),
     Input('approve-variables-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def approve_variables(n_clicks):
-    """User approves validation report"""
+    """User confirms approval"""
     if n_clicks is None:
-        return dash.no_update, dash.no_update
-
-    return dbc.Alert("Variables approved! Ready to generate code.", color="success"), False
+        return dash.no_update
+    return dbc.Alert("✅ Approved — Generate Swimmer Plot is ready.", color="success")
 
 # Handle edit
 @callback(
@@ -510,28 +656,41 @@ def edit_variables(n_clicks):
 @callback(
     [Output('generated-code-store', 'data'),
      Output('code-display', 'children'),
-     Output('main-tabs', 'value')],
+     Output('main-tabs', 'value'),
+     Output('spinner-trigger', 'children', allow_duplicate=True)],
     Input('generate-code-btn', 'n_clicks'),
     [State('customized-data-store', 'data'),
      State('y-variable-dropdown', 'value'),
      State('x-variable-dropdown', 'value'),
      State('hbar-variable-dropdown', 'value'),
-     State('graph-customization-textarea', 'value')],
+     State('graph-customization-textarea', 'value'),
+     State('overlay-marker-dropdown', 'value')],
     prevent_initial_call=True
 )
-def generate_code(n_clicks, customized_data, y_var, x_var, hbar_var, graph_customization):
+def generate_code(n_clicks, customized_data, y_var, x_var, hbar_var, graph_customization, overlay_marker):
     """Generate swimmer plot code"""
     if n_clicks is None or not all([y_var, x_var, hbar_var]):
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     df = pd.DataFrame(customized_data)
+
+    # Append overlay instruction to graph customization if selected
+    graph_custom_full = graph_customization or ""
+    if overlay_marker:
+        overlay_instruction = (
+            f"\nOverlay the variable '{overlay_marker}' as scatter markers. "
+            f"Use x=data['{overlay_marker}'] for X-position and y=data['{y_var}'] for Y-position. "
+            f"Show one marker per row where '{overlay_marker}' is not null. "
+            f"Color/symbol by unique values of '{overlay_marker}'."
+        )
+        graph_custom_full = graph_custom_full + overlay_instruction
 
     try:
         # Generate code (data is already customized, so pass empty data_customization)
         code, info, status = generator.generate_swimmer_code(
             x_var, y_var, hbar_var,
             data_customization="",  # Empty since data is already customized
-            graph_customization=graph_customization or "",
+            graph_customization=graph_custom_full,
             sample_data=df
         )
 
@@ -546,11 +705,11 @@ def generate_code(n_clicks, customized_data, y_var, x_var, hbar_var, graph_custo
             })
         ])
 
-        return code, code_display, 'code-tab'
+        return code, code_display, 'code-tab', dash.no_update
 
     except Exception as e:
         error_display = dbc.Alert(f"Code generation error: {str(e)}", color="danger")
-        return None, error_display, 'code-tab'
+        return None, error_display, 'code-tab', dash.no_update
 
 # Execute code
 @callback(
@@ -583,80 +742,6 @@ def execute_code(n_clicks, code, customized_data):
             html.Pre(result.get('error', 'Unknown error'), style={'marginTop': '10px'})
         ], color="danger")
         return result, status, html.Div("Fix code errors and try again", style={'color': 'red'}), 'results-tab'
-
-# Helper function for dataset customization (same as Shiny)
-def apply_dataset_customization(data, customization_instructions):
-    """Apply dataset-level customization using AI"""
-
-    if not generator.ai_enabled:
-        print("AI not available for dataset customization")
-        return data
-
-    print(f"Applying dataset customization with AI...")
-
-    data_info = {
-        'columns': list(data.columns),
-        'shape': data.shape,
-        'sample_values': {col: list(data[col].dropna().unique()[:3]) for col in data.columns[:8]}
-    }
-
-    prompt = f"""Apply dataset customizations to CDISC clinical trial data.
-
-CURRENT DATASET: ADRS
-- Columns: {data_info['columns']}
-- Shape: {data_info['shape']}
-- Sample values: {data_info['sample_values']}
-
-CUSTOMIZATION INSTRUCTIONS:
-{customization_instructions}
-
-REQUIREMENTS:
-1. Generate Python code that transforms the dataset
-2. DataFrame name: cdisc_data (input) → customized_data (output)
-3. Apply data transformations: filtering, merging, calculations, grouping, selections
-4. If merging with ADSL, assume it's available as adsl_data
-5. Handle missing data appropriately
-6. Preserve key identifier columns (SUBJID, USUBJID)
-7. End with: customized_data = [your final dataframe]
-
-IMPORTANT: The final line MUST be: customized_data = [your_dataframe_variable_name]
-
-Generate clean Python code for dataset transformation:"""
-
-    try:
-        message = generator.claude_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=3500,
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        customization_code = generator._clean_code(message.content[0].text.strip())
-        print(f"Generated dataset customization code: {len(customization_code)} characters")
-
-        # Execute dataset customization
-        import numpy as np
-        exec_globals = {
-            'pd': pd, 'np': np,
-            'cdisc_data': data.copy(),
-            'adsl_data': ADSL_DATA.copy(),  # Make ADSL available for merging
-            'print': print,
-        }
-
-        print("Executing dataset customization code...")
-        exec(customization_code, exec_globals)
-
-        if 'customized_data' in exec_globals:
-            result = exec_globals['customized_data']
-            print(f"Dataset customization successful: {len(data)} → {len(result)} rows")
-            return result
-        else:
-            print("Dataset customization code did not produce 'customized_data' variable")
-            return data
-
-    except Exception as e:
-        print(f"Dataset customization failed: {e}")
-        return data
 
 # Show debug button when execution fails
 @callback(
@@ -978,9 +1063,52 @@ def save_converted_code(n_clicks, converted_code, language):
     except Exception as e:
         return dbc.Alert(f"Save error: {str(e)}", color="danger")
 
+
+# ── Sidebar filter: show unique values for ADSL variable ────────────────────
+@callback(
+    Output('adsl-filter-values', 'children'),
+    Input('adsl-filter-var', 'value'),
+    prevent_initial_call=True
+)
+def show_adsl_filter_values(var):
+    """Show unique values for selected ADSL variable"""
+    if not var:
+        return html.Div()
+    vals = sorted(ADSL_DATA[var].dropna().unique().tolist())
+    return html.Div([
+        html.P(f"{len(vals)} unique values:", style={'fontSize': '9px', 'color': '#6c757d', 'marginBottom': '2px'}),
+        html.Div(
+            ", ".join(str(v) for v in vals[:30]) + ("..." if len(vals) > 30 else ""),
+            style={'fontSize': '9px', 'color': '#333', 'wordBreak': 'break-word',
+                   'background': '#fff', 'border': '1px solid #dee2e6',
+                   'borderRadius': '3px', 'padding': '3px'}
+        )
+    ])
+
+# ── Sidebar filter: show unique values for ADRS variable ────────────────────
+@callback(
+    Output('adrs-filter-values', 'children'),
+    Input('adrs-filter-var', 'value'),
+    prevent_initial_call=True
+)
+def show_adrs_filter_values(var):
+    """Show unique values for selected ADRS variable"""
+    if not var:
+        return html.Div()
+    vals = sorted(ADRS_DATA[var].dropna().unique().tolist())
+    return html.Div([
+        html.P(f"{len(vals)} unique values:", style={'fontSize': '9px', 'color': '#6c757d', 'marginBottom': '2px'}),
+        html.Div(
+            ", ".join(str(v) for v in vals[:30]) + ("..." if len(vals) > 30 else ""),
+            style={'fontSize': '9px', 'color': '#333', 'wordBreak': 'break-word',
+                   'background': '#fff', 'border': '1px solid #dee2e6',
+                   'borderRadius': '3px', 'padding': '3px'}
+        )
+    ])
+
 # =============================================================================
 # RUN APP
 # =============================================================================
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8050)
+    app.run(debug=True, port=8050, use_reloader=False)

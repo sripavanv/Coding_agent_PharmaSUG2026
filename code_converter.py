@@ -1,260 +1,140 @@
 """
 Code Converter Module
-Converts Python swimmer plot code to R or SAS
-Handles language-specific syntax and plotting libraries
+Converts Python swimmer plot code to R (ggplot2/plotly) or SAS (GTL).
 """
 
-import pandas as pd
 import os
+import pandas as pd
+
+MODEL = "claude-sonnet-4-6"
 
 
 class CodeConverter:
     def __init__(self, claude_client=None, ai_enabled=False):
-        """Initialize code converter with AI client"""
         self.claude_client = claude_client
         self.ai_enabled = ai_enabled
 
     def convert_code_to_language(self, python_code, target_language, plot_context=None):
-        """Convert Python swimmer plot code to R or SAS"""
-
+        """Convert Python swimmer plot code to R or SAS."""
         if not self.ai_enabled:
             return "# Error: AI not available for code conversion", "error", []
-
         if not python_code or not python_code.strip():
             return "# Error: No Python code available for conversion", "error", []
-
-        if target_language not in ["R", "SAS"]:
-            return f"# Error: Unsupported target language: {target_language}", "error", []
+        if target_language not in ("R", "SAS"):
+            return f"# Error: Unsupported language '{target_language}'", "error", []
 
         print(f"\n=== CODE CONVERSION TO {target_language} ===")
-        print(f"Converting {len(python_code)} characters of Python code...")
 
-        try:
-            if target_language == "R":
-                converted_code = self._convert_to_r(python_code, plot_context)
-                notes = [
-                    "R version uses ggplot2 for static plots and plotly for interactive plots",
-                    "Required packages: ggplot2, plotly, dplyr, scales",
-                    "Data frame assumed to be named 'recist_data'",
-                    "Install packages: install.packages(c('ggplot2', 'plotly', 'dplyr', 'scales'))"
-                ]
-            else:  # SAS
-                converted_code = self._convert_to_sas(python_code, plot_context)
-                notes = [
-                    "SAS version uses GTL (Graph Template Language) for swimmer plots",
-                    "Creates PROC TEMPLATE to define the graph layout",
-                    "Uses PROC SGRENDER to render the defined template",
-                    "Dataset assumed to be named RECIST_DATA",
-                    "Supports SAS 9.4+ with ODS Graphics enabled"
-                ]
-
-            print(f"✅ Successfully converted to {target_language}")
-            return converted_code, "success", notes
-
-        except Exception as e:
-            error_msg = f"Code conversion to {target_language} failed: {str(e)}"
-            print(error_msg)
-            return f"# Error: {error_msg}", "error", []
-
-    def _convert_to_r(self, python_code, plot_context):
-        """Convert Python swimmer plot code to R using ggplot2 and plotly"""
-
-        context_info = ""
+        context_str = ""
         if plot_context:
-            context_info = f"""
-PLOT CONTEXT:
-- X-axis variable: {plot_context.get('x_var', 'Unknown')}
-- Y-axis variable: {plot_context.get('y_var', 'Unknown')}
-- HBAR variable: {plot_context.get('hbar_var', 'Unknown')}
-- Data shape: {plot_context.get('processed_data_shape', 'Unknown')}
-"""
-
-        prompt = f"""Convert this Python swimmer plot code to R using ggplot2 and plotly:
-
-{context_info}
-
-PYTHON CODE TO CONVERT:
-```python
-{python_code}
-```
-
-REQUIREMENTS FOR R CONVERSION:
-1. Use R syntax and ggplot2/plotly libraries
-2. Data frame name: recist_data (R naming convention)
-3. Create equivalent swimmer plot with horizontal bars + scatter points
-4. Maintain the same visual customizations (colors, titles, layouts)
-5. Use geom_col() for horizontal bars and geom_point() for scatter markers
-6. Convert to interactive plotly if the Python version uses plotly
-7. Handle any datetime conversions using lubridate or base R
-8. Include library() calls at the top
-
-R SWIMMER PLOT STRUCTURE:
-- library(ggplot2, plotly, dplyr, scales)
-- Use recist_data data frame
-- geom_col() with coord_flip() for horizontal duration bars
-- geom_point() for assessment timepoints
-- Equivalent styling: theme(), scale_color_manual(), labs()
-- ggplotly() for interactivity if needed
-
-CONVERSION NOTES:
-- Python pandas → R dplyr equivalents
-- Python .dt.days → R as.numeric(difftime())
-- Plotly Python fig.update_layout() → R ggplotly() %>% layout()
-- Python string formatting → R paste() or glue()
-
-Generate clean, executable R code with proper swimmer plot structure:"""
-
-        try:
-            message = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4500,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
+            context_str = (
+                f"\nPLOT CONTEXT:\n"
+                f"- X={plot_context.get('x_var')}, Y={plot_context.get('y_var')}, "
+                f"HBAR={plot_context.get('hbar_var')}, shape={plot_context.get('processed_data_shape')}\n"
             )
 
-            r_code = self._clean_code(message.content[0].text.strip())
-            print(f"Generated {len(r_code)} characters of R code")
+        if target_language == "R":
+            converted_code, notes = self._convert_to_r(python_code, context_str)
+        else:
+            converted_code, notes = self._convert_to_sas(python_code, context_str)
 
-            return r_code
-
-        except Exception as e:
-            return f"# Error converting to R: {str(e)}"
-
-    def _convert_to_sas(self, python_code, plot_context):
-        """Convert Python swimmer plot code to SAS using GTL (Graph Template Language)"""
-
-        context_info = ""
-        if plot_context:
-            context_info = f"""
-PLOT CONTEXT:
-- X-axis variable: {plot_context.get('x_var', 'Unknown')}
-- Y-axis variable: {plot_context.get('y_var', 'Unknown')}
-- HBAR variable: {plot_context.get('hbar_var', 'Unknown')}
-- Data shape: {plot_context.get('processed_data_shape', 'Unknown')}
-"""
-
-        prompt = f"""Convert this Python swimmer plot code to SAS using GTL (Graph Template Language):
-
-{context_info}
-
-PYTHON CODE TO CONVERT:
-```python
-{python_code}
-```
-
-REQUIREMENTS FOR SAS GTL CONVERSION:
-1. Use SAS GTL (Graph Template Language) for maximum flexibility
-2. Create a PROC TEMPLATE to define the swimmer plot layout
-3. Use PROC SGRENDER to render the template with data
-4. Dataset name: RECIST_DATA (SAS naming convention)
-5. Create equivalent swimmer plot with horizontal bars + scatter points
-6. Maintain the same visual customizations (colors, titles, layouts)
-7. Handle any datetime processing with SAS date functions
-8. Include proper title, axis labels, and legend options
-
-SAS GTL SWIMMER PLOT STRUCTURE:
-- PROC TEMPLATE; DEFINE STATGRAPH swimmer_plot;
-  - BEGINGRAPH / DESIGNWIDTH=800px DESIGNHEIGHT=600px;
-  - LAYOUT OVERLAY / XAXISOPTS=(...) YAXISOPTS=(...);
-    - BARCHARTPARM for horizontal duration bars
-    - SCATTERPLOT for assessment timepoints
-    - ENTRY statements for title and footnotes
-  - ENDLAYOUT;
-  - ENDGRAPH;
-- END; RUN;
-- PROC SGRENDER DATA=RECIST_DATA TEMPLATE=swimmer_plot;
-- RUN;
-
-CONVERSION NOTES:
-- Python pandas operations → SAS DATA steps
-- Python .dt.days → SAS DATDIF() or similar functions
-- Plotly styling → GTL STYLEATTRS, DISCRETEATTRMAP, and appearance options
-- Python string operations → SAS string functions
-- Group coloring → GTL GROUP= with DISCRETEATTRMAP
-- Interactive features → Use ODS destinations like HTML5 with drill-down
-- GTL provides pixel-perfect control over layout and styling
-
-Generate clean, executable SAS GTL code with PROC TEMPLATE definition and PROC SGRENDER execution:"""
-
-        try:
-            message = self.claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4500,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            sas_code = self._clean_code(message.content[0].text.strip())
-            print(f"Generated {len(sas_code)} characters of SAS code")
-
-            return sas_code
-
-        except Exception as e:
-            return f"/* Error converting to SAS: {str(e)} */"
+        print(f"✅ Converted to {target_language}: {len(converted_code)} characters")
+        return converted_code, "success", notes
 
     def save_converted_code(self, code_content, language):
-        """Save converted code with appropriate file extension"""
-        try:
-            os.makedirs("./saved_code", exist_ok=True)
+        """Save converted code with the appropriate file extension."""
+        ext_map = {"R": "R", "SAS": "sas"}
+        ext = ext_map.get(language, "txt")
 
-            # Set file extension based on language
-            if language == "R":
-                ext = "R"
-                comment_style = "#"
-            elif language == "SAS":
-                ext = "sas"
-                comment_style = "/*"
-            else:
-                ext = "txt"
-                comment_style = "#"
+        os.makedirs("./saved_code", exist_ok=True)
+        i = 1
+        while os.path.exists(f"./saved_code/swimmer_plot_{language.lower()}_{i}.{ext}"):
+            i += 1
+        path = f"./saved_code/swimmer_plot_{language.lower()}_{i}.{ext}"
 
-            counter = 1
-            while os.path.exists(f"./saved_code/swimmer_plot_{language.lower()}_{counter}.{ext}"):
-                counter += 1
+        if language == "SAS":
+            header = f"/*\nClinical Trials Swimmer Plot — SAS\nGenerated: {pd.Timestamp.now()}\nConverted from Python\n*/\n\n"
+        else:
+            header = f"# Clinical Trials Swimmer Plot — {language}\n# Generated: {pd.Timestamp.now()}\n# Converted from Python\n\n"
 
-            filename = f"./saved_code/swimmer_plot_{language.lower()}_{counter}.{ext}"
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(header + code_content)
 
-            # Create appropriate header comment
-            if language == "SAS":
-                header = f"""/*
-Clinical Trials Swimmer Plot - {language} Version
-Generated: {pd.Timestamp.now()}
-Converted from Python code
-*/
+        return f"Saved as swimmer_plot_{language.lower()}_{i}.{ext}"
 
-"""
-            else:
-                header = f"""{comment_style} Clinical Trials Swimmer Plot - {language} Version
-{comment_style} Generated: {pd.Timestamp.now()}
-{comment_style} Converted from Python code
+    # ── Private converters ─────────────────────────────────────────────────────
 
-"""
+    def _convert_to_r(self, python_code, context_str):
+        prompt = f"""Convert this Python swimmer plot to R using ggplot2 and plotly.
+{context_str}
+PYTHON CODE:
+```python
+{python_code}
+```
 
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(header + code_content)
+R REQUIREMENTS:
+1. Data frame name: recist_data
+2. library() calls at top: ggplot2, plotly, dplyr, scales
+3. geom_col() + coord_flip() for horizontal duration bars
+4. geom_point() for overlay markers
+5. ggplotly() for interactivity
+6. Preserve same colors, titles, and layout as the Python version
+7. pandas → dplyr; .dt.days → as.numeric(difftime(...))
 
-            return f"Saved as swimmer_plot_{language.lower()}_{counter}.{ext}"
+Generate clean, executable R code:"""
 
-        except Exception as e:
-            return f"Save failed: {str(e)}"
+        notes = [
+            "R version uses ggplot2 (static) and plotly (interactive).",
+            "Required: install.packages(c('ggplot2','plotly','dplyr','scales'))",
+            "Data frame assumed to be named 'recist_data'.",
+        ]
+        return self._call_ai(prompt), notes
 
-    def _clean_code(self, generated_code):
-        """Simple code cleaning"""
-        # Remove markdown code blocks
-        if '```r' in generated_code.lower():
-            start = generated_code.lower().find('```r') + 4
-            end = generated_code.find('```', start)
-            if end > start:
-                return generated_code[start:end].strip()
-        elif '```sas' in generated_code.lower():
-            start = generated_code.lower().find('```sas') + 6
-            end = generated_code.find('```', start)
-            if end > start:
-                return generated_code[start:end].strip()
-        elif '```' in generated_code:
-            start = generated_code.find('```') + 3
-            end = generated_code.find('```', start)
-            if end > start:
-                return generated_code[start:end].strip()
+    def _convert_to_sas(self, python_code, context_str):
+        prompt = f"""Convert this Python swimmer plot to SAS using GTL (Graph Template Language).
+{context_str}
+PYTHON CODE:
+```python
+{python_code}
+```
 
-        return generated_code.strip()
+SAS GTL REQUIREMENTS:
+1. Dataset name: RECIST_DATA
+2. Structure:
+   PROC TEMPLATE; DEFINE STATGRAPH swimmer_plot;
+     BEGINGRAPH;
+     LAYOUT OVERLAY / XAXISOPTS=(...) YAXISOPTS=(...);
+       BARCHARTPARM for horizontal duration bars;
+       SCATTERPLOT for overlay markers;
+     ENDLAYOUT;
+     ENDGRAPH;
+   END; RUN;
+   PROC SGRENDER DATA=RECIST_DATA TEMPLATE=swimmer_plot; RUN;
+3. Preserve same colors, titles, and layout as the Python version
+4. SAS 9.4+ with ODS Graphics enabled
+5. Use DISCRETEATTRMAP for group coloring
+
+Generate clean, executable SAS GTL code:"""
+
+        notes = [
+            "SAS version uses GTL (PROC TEMPLATE + PROC SGRENDER).",
+            "Dataset assumed to be named RECIST_DATA.",
+            "Requires SAS 9.4+ with ODS Graphics enabled.",
+        ]
+        return self._call_ai(prompt), notes
+
+    def _call_ai(self, prompt):
+        msg = self.claude_client.messages.create(
+            model=MODEL, max_tokens=4500, temperature=0.1,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return self._clean_code(msg.content[0].text.strip())
+
+    def _clean_code(self, text):
+        for fence in ('```r', '```sas', '```python', '```'):
+            if fence in text.lower():
+                s = text.lower().find(fence) + len(fence)
+                e = text.find('```', s)
+                if e > s:
+                    return text[s:e].strip()
+        return text.strip()
