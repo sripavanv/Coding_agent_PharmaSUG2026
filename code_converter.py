@@ -6,7 +6,7 @@ Converts Python swimmer plot code to R (ggplot2/plotly) or SAS (GTL).
 import os
 import pandas as pd
 
-MODEL = "claude-sonnet-4-6"
+from utils import clean_code, call_ai, next_save_path, MODEL
 
 
 class CodeConverter:
@@ -45,12 +45,8 @@ class CodeConverter:
         """Save converted code with the appropriate file extension."""
         ext_map = {"R": "R", "SAS": "sas"}
         ext = ext_map.get(language, "txt")
-
-        os.makedirs("./saved_code", exist_ok=True)
-        i = 1
-        while os.path.exists(f"./saved_code/swimmer_plot_{language.lower()}_{i}.{ext}"):
-            i += 1
-        path = f"./saved_code/swimmer_plot_{language.lower()}_{i}.{ext}"
+        prefix = f"swimmer_plot_{language.lower()}"
+        path = next_save_path(prefix, ext)
 
         if language == "SAS":
             header = f"/*\nClinical Trials Swimmer Plot — SAS\nGenerated: {pd.Timestamp.now()}\nConverted from Python\n*/\n\n"
@@ -60,12 +56,12 @@ class CodeConverter:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(header + code_content)
 
-        return f"Saved as swimmer_plot_{language.lower()}_{i}.{ext}"
+        return f"Saved as {os.path.basename(path)}"
 
     # ── Private converters ─────────────────────────────────────────────────────
 
     def _convert_to_r(self, python_code, context_str):
-        prompt = f"""Convert this Python swimmer plot to R using ggplot2 and plotly.
+        prompt = f"""Convert this Python swimmer plot to R using plotly (NOT ggplot2).
 {context_str}
 PYTHON CODE:
 ```python
@@ -74,19 +70,23 @@ PYTHON CODE:
 
 R REQUIREMENTS:
 1. Data frame name: recist_data
-2. library() calls at top: ggplot2, plotly, dplyr, scales
-3. geom_col() + coord_flip() for horizontal duration bars
-4. geom_point() for overlay markers
-5. ggplotly() for interactivity
-6. Preserve same colors, titles, and layout as the Python version
-7. pandas → dplyr; .dt.days → as.numeric(difftime(...))
+2. library() calls at top: plotly, dplyr
+3. Use plotly directly with plot_ly() - do NOT use ggplot2 or ggplotly()
+4. Use add_trace() with type='bar' for horizontal duration bars (orientation='h')
+5. Use add_trace() with type='scattergl' and mode='markers' for overlay markers (WebGL for performance)
+6. Use layout() to configure axes, titles, and styling
+7. Preserve same colors, titles, and layout as the Python version
+8. pandas → dplyr; .dt.days → as.numeric(difftime(...))
+
+IMPORTANT: Use scattergl (not scatter) for all scatter plots to enable WebGL rendering for better performance.
 
 Generate clean, executable R code:"""
 
         notes = [
-            "R version uses ggplot2 (static) and plotly (interactive).",
-            "Required: install.packages(c('ggplot2','plotly','dplyr','scales'))",
+            "R version uses plotly directly (not ggplot2).",
+            "Required: install.packages(c('plotly','dplyr'))",
             "Data frame assumed to be named 'recist_data'.",
+            "Scatter plots use WebGL (scattergl) for better performance."
         ]
         return self._call_ai(prompt), notes
 
@@ -124,17 +124,4 @@ Generate clean, executable SAS GTL code:"""
         return self._call_ai(prompt), notes
 
     def _call_ai(self, prompt):
-        msg = self.claude_client.messages.create(
-            model=MODEL, max_tokens=4500, temperature=0.1,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return self._clean_code(msg.content[0].text.strip())
-
-    def _clean_code(self, text):
-        for fence in ('```r', '```sas', '```python', '```'):
-            if fence in text.lower():
-                s = text.lower().find(fence) + len(fence)
-                e = text.find('```', s)
-                if e > s:
-                    return text[s:e].strip()
-        return text.strip()
+        return call_ai(self.claude_client, prompt, max_tokens=4500, temperature=0.1)

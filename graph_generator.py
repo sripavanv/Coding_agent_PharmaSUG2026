@@ -4,12 +4,13 @@ Generates, debugs, and executes Python swimmer plot code via AI.
 """
 
 import io
+import os
 import contextlib
 import traceback
 import pandas as pd
 import numpy as np
 
-MODEL = "claude-sonnet-4-6"
+from utils import clean_code, call_ai, next_save_path, MODEL
 
 # Shared swimmer plot invariants injected into every prompt
 _SWIMMER_INVARIANTS = """
@@ -20,15 +21,53 @@ FUNDAMENTAL SWIMMER PLOT STRUCTURE — NEVER VIOLATE
    NEVER use numeric indices. NEVER remove subjects.
 
 2. HBAR (Horizontal Bars):
-   go.Bar(orientation='h', y=data['{y_var}'], x=data['{hbar_var}'])
+   go.Bar(orientation='h', y=hbar_data['{y_var}'], x=hbar_data['{hbar_var}'])
    ONE bar per subject — MANDATORY. Cannot be removed.
+   hbar_data = plot_data.drop_duplicates(subset=['{y_var}'])
 
 3. X-AXIS: {x_var} column — numeric/linear time scale. NEVER categorical.
 
 4. OVERLAYS (optional):
-   go.Scatter traces on top of HBARs.
+   go.Scatter traces on top of HBARs using plot_data (ALL rows).
    y MUST reference {y_var} column values — NEVER numeric indices or y_pos variables.
+   X position MUST be a numeric/day column — NEVER a categorical string column.
    DO NOT create subject_positions dicts or computed Y mappings.
+"""
+
+# Parameterized starter skeleton injected into every generation prompt.
+# The AI must begin its code with this exactly — only customizations are added below it.
+_STARTER_SKELETON = """
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
+
+# ── SORT: longest bars at top ──────────────────────────────────
+plot_data = recist_data.sort_values('{hbar_var}', ascending=True).copy()
+
+# ── INITIALISE FIGURE ──────────────────────────────────────────
+fig = go.Figure()
+
+# ── HBAR TRACE — ONE BAR PER SUBJECT (MANDATORY) ──────────────
+# Deduplicate to one row per subject for bars only
+hbar_data = plot_data.drop_duplicates(subset=['{y_var}'])
+
+fig.add_trace(
+    go.Bar(
+        orientation='h',
+        name='Treatment Duration',
+        y=hbar_data['{y_var}'],        # categorical Y — NEVER numeric indices
+        x=hbar_data['{hbar_var}'],     # bar length = duration
+        text=hbar_data['{hbar_var}'].astype(str) + 'd',
+        textposition='outside',
+        marker=dict(color='#aec7e8', line=dict(color='#1f77b4', width=1.2)),
+        showlegend=True,
+    )
+)
+
+# ── OVERLAYS go here — use plot_data (ALL rows) for scatter markers ──
+# go.Scatter traces MUST use y=plot_data['{y_var}'] — NEVER numeric indices
+# X position MUST be a numeric/day column — NEVER a categorical string column
+# ─────────────────────────────────────────────────────────────────────
 """
 
 
@@ -42,6 +81,9 @@ class GraphGenerator:
     def generate_with_ai(self, x_var, y_var, hbar_var, graph_customization, processed_data, derivation_context=None):
         """Generate swimmer plot code with AI focusing on graph customizations."""
         invariants = _SWIMMER_INVARIANTS.format(y_var=y_var, x_var=x_var, hbar_var=hbar_var)
+
+        # Parameterize skeleton with actual variable names
+        skeleton = _STARTER_SKELETON.format(y_var=y_var, x_var=x_var, hbar_var=hbar_var)
 
         # Build derivation context section (handover from data step)
         deriv_section = ""
@@ -88,19 +130,35 @@ VARIABLE MAPPING:
 - X-axis (linear):      {x_var}
 - HBAR (duration):      {hbar_var}
 
+DATA STRUCTURE NOTE:
+- recist_data has {processed_data.shape[0]} rows and {processed_data[y_var].nunique()} unique subjects
+- Average rows per subject: {processed_data.shape[0] / max(processed_data[y_var].nunique(), 1):.1f}
+- hbar_data (for go.Bar): drop_duplicates on {y_var} → one row per subject
+- plot_data (for go.Scatter overlays): ALL rows — one marker per assessment
+
 ═══════════════════════════════════════════════════════════════════
 SWIMMER PLOT TERMINOLOGY
 ═══════════════════════════════════════════════════════════════════
-HBAR = go.Bar(orientation='h') traces — one per unique {y_var} value.
+HBAR = go.Bar(orientation='h') traces — uses hbar_data (one row per subject).
   "for Hbar" instructions → modify go.Bar traces (color, border, hover, text).
   Inline bar labels: use text= and textposition= directly in go.Bar().
   DO NOT use fig.add_annotation() loops for bar end labels.
 
-OVERLAYS = go.Scatter(mode='markers') traces on top of HBARs.
-  "overlay EOS" → x=data['EOS'] (the variable IS the X position).
-  "overlay [VARIABLE]" where variable is a timepoint → x=data['VARIABLE'].
-  "overlay categorical assessments" → x=data['{x_var}'].
-  Always filter to non-null: data[data['VAR'].notna()].
+OVERLAYS = go.Scatter(mode='markers') traces — uses plot_data (all rows).
+  "overlay EOS" → x=plot_data['EOS'] (the variable IS the numeric X position).
+  "overlay [VARIABLE]" where variable is a timepoint → x=plot_data['VARIABLE'].
+  "overlay categorical assessments" → color/symbol by category, x=plot_data['{x_var}'].
+  CRITICAL: X position of overlays MUST be numeric (same axis as HBARs).
+  NEVER set x= to a categorical string column — use it for color/symbol grouping only.
+  Always filter to non-null: plot_data[plot_data['VAR'].notna()].
+
+═══════════════════════════════════════════════════════════════════
+YOUR CODE MUST START WITH THIS SKELETON — DO NOT MODIFY IT
+ONLY ADD: overlay traces, layout, axis settings below the skeleton
+═══════════════════════════════════════════════════════════════════
+```python
+{skeleton}
+```
 
 ═══════════════════════════════════════════════════════════════════
 USER'S GRAPH CUSTOMIZATION REQUEST
@@ -115,13 +173,12 @@ INSTRUCTION RULES:
 ═══════════════════════════════════════════════════════════════════
 CODE REQUIREMENTS
 ═══════════════════════════════════════════════════════════════════
-- import plotly.graph_objects as go
-- fig = go.Figure()
-- go.Bar(orientation='h') for HBARs with inline text labels (text=, textposition=)
-- go.Scatter(mode='markers') for overlays
+- Start with the skeleton above verbatim (imports already included)
+- go.Scatter(mode='markers') for overlays, using plot_data (ALL rows)
 - y references MUST use {y_var} column values — never numeric indices
 - fig.update_layout() for title, axis labels, legend, height
-- fig.update_xaxes() / fig.update_yaxes() for axis settings
+- fig.update_xaxes(type='linear') — ALWAYS linear
+- fig.update_yaxes(type='category') — ALWAYS category
 - End with: fig.show()
 - Clear variable names, section comments, handle missing data (dropna/notna)
 
@@ -156,6 +213,8 @@ COMMON FIXES:
 - Column errors: verify exact column names in recist_data
 - Data types: pd.to_numeric(errors='coerce')
 - Y-axis: must use {y_var} column values, not numeric indices
+- hbar_data must be drop_duplicates(subset=['{y_var}']) from plot_data
+- Overlay x= must be a numeric column, never a categorical string column
 
 End fixed code with: fig.show()
 
@@ -204,35 +263,12 @@ Generate ONLY the corrected Python code:"""
     # ── Persistence ────────────────────────────────────────────────────────────
 
     def save_code(self, code_content):
-        import os
-        os.makedirs("./saved_code", exist_ok=True)
-        i = 1
-        while os.path.exists(f"./saved_code/swimmer_plot_{i}.py"):
-            i += 1
-        path = f"./saved_code/swimmer_plot_{i}.py"
+        path = next_save_path('swimmer_plot', 'py')
         with open(path, 'w', encoding='utf-8') as f:
             f.write(f'"""\nClinical Trials Swimmer Plot\nGenerated: {pd.Timestamp.now()}\n"""\n\n{code_content}')
-        return f"Saved as swimmer_plot_{i}.py"
+        return f"Saved as {os.path.basename(path)}"
 
     # ── Internal ───────────────────────────────────────────────────────────────
 
     def _call_ai(self, prompt, max_tokens=4000, temperature=0.1):
-        msg = self.claude_client.messages.create(
-            model=MODEL, max_tokens=max_tokens, temperature=temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return self._clean_code(msg.content[0].text.strip())
-
-    def _clean_code(self, text):
-        """Strip markdown fences; remove fig.show() for Shiny/Dash compatibility."""
-        if '```python' in text:
-            s = text.find('```python') + 9
-            e = text.find('```', s)
-            if e > s:
-                text = text[s:e].strip()
-        elif '```' in text:
-            s = text.find('```') + 3
-            e = text.find('```', s)
-            if e > s:
-                text = text[s:e].strip()
-        return text.replace('fig.show()', '# fig.show() removed for Shiny integration').strip()
+        return call_ai(self.claude_client, prompt, max_tokens=max_tokens, temperature=temperature)

@@ -47,18 +47,6 @@ def get_cdisc_datasets() -> dict:
     }
 
 
-def check_cdisc_availability() -> dict:
-    """Check which CDISC files are present and readable."""
-    availability = {}
-    for name, info in get_cdisc_datasets().items():
-        try:
-            path = BASE_DIR / info['file']
-            availability[name] = path.exists() and not pd.read_csv(path, nrows=1).empty
-        except Exception:
-            availability[name] = False
-        print(f"{name}: {'✅ Available' if availability[name] else '❌ Not available'}")
-    return availability
-
 
 # Convenience loaders
 def load_adsl():  return load_cdisc_data("ADSL")

@@ -13,7 +13,7 @@ import sys
 import pandas as pd
 import numpy as np
 
-MODEL = "claude-sonnet-4-6"
+from utils import clean_code, call_ai, MODEL
 
 
 class DataCustomizer:
@@ -195,11 +195,7 @@ CRITICAL RULES:
 Generate clean Python code:"""
 
         try:
-            message = self.claude_client.messages.create(
-                model=MODEL, max_tokens=3000, temperature=0.1,
-                messages=[{"role": "user", "content": data_prompt}],
-            )
-            data_transform_code = self._clean_code(message.content[0].text.strip())
+            data_transform_code = call_ai(self.claude_client, data_prompt, max_tokens=3000, temperature=0.1)
             self.derivation_context['derivation_code'] = data_transform_code
 
             return self._execute_and_capture(
@@ -316,11 +312,7 @@ REQUIREMENTS:
 Generate ONLY the corrected Python code:"""
 
         try:
-            message = self.claude_client.messages.create(
-                model=MODEL, max_tokens=3000, temperature=0.1,
-                messages=[{"role": "user", "content": debug_prompt}],
-            )
-            fixed_code = self._clean_code(message.content[0].text.strip())
+            fixed_code = call_ai(self.claude_client, debug_prompt, max_tokens=3000, temperature=0.1)
 
             exec_globals = {
                 'pd': pd, 'np': np,
@@ -361,33 +353,5 @@ Generate ONLY the corrected Python code:"""
             'variables_for_plot': {'y_axis': y_var, 'x_axis': x_var, 'hbar': hbar_var},
         }
 
-    def filter_data_to_plot_variables(self, data, required_vars, additional_vars=None):
-        """Filter dataset to keep only variables needed for plotting"""
-        if data is None:
-            return None
-        keep = set(required_vars)
-        if isinstance(additional_vars, str):
-            keep.add(additional_vars)
-        elif isinstance(additional_vars, (list, tuple)):
-            keep.update(additional_vars)
-        cols = list(keep.intersection(data.columns))
-        if not cols:
-            print("⚠ No matching columns found for filtering.")
-            return data
-        filtered = data[cols].copy()
-        print(f"Filtered: {len(data.columns)} → {len(filtered.columns)} columns kept: {cols}")
-        return filtered
 
-    def _clean_code(self, generated_code):
-        """Simple code cleaning"""
-        if '```python' in generated_code:
-            start = generated_code.find('```python') + 9
-            end   = generated_code.find('```', start)
-            if end > start:
-                return generated_code[start:end].strip()
-        elif '```' in generated_code:
-            start = generated_code.find('```') + 3
-            end   = generated_code.find('```', start)
-            if end > start:
-                return generated_code[start:end].strip()
-        return generated_code.strip()
+

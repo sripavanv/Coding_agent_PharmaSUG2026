@@ -5,6 +5,8 @@ Handles iterative, dialogue-based modifications to an existing swimmer plot.
 
 import pandas as pd
 
+from utils import clean_code
+
 MODEL = "claude-sonnet-4-6"
 
 
@@ -15,13 +17,15 @@ class GraphCustomizer:
         self.conversation_history = []
         self.current_plot_context = {
             'code': '', 'x_var': '', 'y_var': '', 'hbar_var': '', 'processed_data_shape': None,
+            'available_columns': []
         }
 
-    def set_plot_context(self, code, x_var, y_var, hbar_var, processed_data_shape):
+    def set_plot_context(self, code, x_var, y_var, hbar_var, processed_data_shape, available_columns=None):
         """Set a new plot context and reset conversation history."""
         self.current_plot_context = {
             'code': code, 'x_var': x_var, 'y_var': y_var,
             'hbar_var': hbar_var, 'processed_data_shape': processed_data_shape,
+            'available_columns': available_columns or []
         }
         self.conversation_history.clear()
 
@@ -43,8 +47,19 @@ class GraphCustomizer:
         print(f"History: {len(self.conversation_history)} messages")
 
         try:
-            modified_code = self._apply_customization(user_request)
-            self.current_plot_context['code'] = modified_code
+            result = self._apply_customization(user_request)
+
+            # Pre-flight check returned a user action message — don't update code or history
+            if result.startswith('# USER_ACTION_REQUIRED'):
+                msg = result.replace('# USER_ACTION_REQUIRED\n# ', '').strip()
+                self.conversation_history.append({
+                    'type': 'assistant',
+                    'content': msg,
+                    'timestamp': pd.Timestamp.now(),
+                })
+                return self.current_plot_context['code'], [msg], "action_required"
+
+            self.current_plot_context['code'] = result
             self.conversation_history.append({
                 'type': 'assistant',
                 'content': f"Applied: {user_request[:100]}...",
@@ -56,7 +71,7 @@ class GraphCustomizer:
                 f"Conversation history: {len(self.conversation_history)} messages",
                 f"Variables: {ctx['x_var']}, {ctx['y_var']}, {ctx['hbar_var']}",
             ]
-            return modified_code, info, "customized"
+            return result, info, "customized"
 
         except Exception as e:
             print(f"⚠ Customization failed: {e}")
@@ -70,10 +85,68 @@ class GraphCustomizer:
         print("Conversation history cleared.")
 
     # ── Internal ───────────────────────────────────────────────────────────────
+    # ── Pre-flight variable check ──────────────────────────────────────────────
+
+    def _check_var_references(self, user_request, available_cols):
+        """Python-side enforcement of VAR: prefix convention.
+
+        Returns (ok, message) where:
+          ok=True  → safe to call AI
+          ok=False → return message directly to user, skip AI call
+        """
+        import re
+
+        # Detect bare column-like tokens that look like dataset variables but lack VAR:
+        # Heuristic: ALL_CAPS words of 3+ chars, or known patterns like overlaying a word
+        # that matches an available column without the VAR: prefix.
+        var_tagged = re.findall(r'VAR:(\w+)', user_request)
+
+        # Strip VAR: prefixed words first, then find bare ALL_CAPS words (3+ chars)
+        request_stripped = re.sub(r'VAR:\w+', '', user_request)
+        bare_upper = re.findall(r'\b([A-Z][A-Z0-9_]{2,})\b', request_stripped)
+
+        # Deduplicate; skip common non-column words
+        IGNORE = {'NL', 'AI', 'SAS', 'GTL', 'HTML', 'CSS', 'URL', 'API',
+                  'NA', 'TRUE', 'FALSE', 'NULL', 'AND', 'OR', 'NOT',
+                  'FOR', 'USE', 'ADD', 'SET', 'GET', 'PUT', 'ALL', 'NEW', 'OLD'}
+        bare_upper = [w for w in dict.fromkeys(bare_upper) if w not in IGNORE and w not in var_tagged]
+
+        if bare_upper:
+            suggestions = "  ".join(f"VAR:{w}" for w in bare_upper)
+            return False, (
+                f"⚠ Looks like you're referencing column(s) **{', '.join(bare_upper)}** "
+                f"without the required `VAR:` prefix.\n\n"
+                f"Please rewrite using the prefix so the system can validate the column before calling AI:\n"
+                f"→ {suggestions}"
+            )
+
+        # Check VAR: tagged columns exist in available_cols
+        unavailable = [v for v in var_tagged if v not in available_cols]
+
+        if unavailable:
+            col_list = ", ".join(f"`VAR:{v}`" for v in unavailable)
+            return False, (
+                f"❌ Column(s) {col_list} are not available in the current plot dataset.\n\n"
+                f"To use {'this column' if len(unavailable)==1 else 'these columns'}:\n"
+                f"1. Go back to **Step 2: Swimmer Plot Variables**\n"
+                f"2. Add the column(s) to **Additional Variables to Keep**\n"
+                f"3. Click **Generate Validation Report** → **Generate Swimmer Plot**\n"
+                f"4. Return here to Interactive Customization\n\n"
+                f"💡 If it's a derived variable, create it in **Step 1: Data Customization** first."
+            )
+
+        return True, ""
+
 
     def _apply_customization(self, user_request):
         ctx = self.current_plot_context
         y, x, hbar = ctx['y_var'], ctx['x_var'], ctx['hbar_var']
+        available_cols = ctx.get('available_columns', [])
+
+        # ── Python-side VAR: check — runs before AI call ──────────────────────
+        ok, msg = self._check_var_references(user_request, available_cols)
+        if not ok:
+            return f'# USER_ACTION_REQUIRED\n# {msg}'
 
         # Last 6 messages for context
         history_str = ""
@@ -84,6 +157,12 @@ class GraphCustomizer:
                 snippet = m['content'][:150] + ("..." if len(m['content']) > 150 else "")
                 lines.append(f"  {i}. {role}: {snippet}")
             history_str = "\nCONVERSATION HISTORY (last 6):\n" + "\n".join(lines) + "\n"
+
+        # Build available columns display
+        if available_cols:
+            cols_str = f"AVAILABLE COLUMNS IN DATASET:\n{', '.join(available_cols)}\n\nThese are the ONLY columns you can use in data['column_name'] references."
+        else:
+            cols_str = f"AVAILABLE COLUMNS IN DATASET:\nPrimary columns: {x}, {y}, {hbar}\n(No additional columns were selected in Step 2)"
 
         prompt = f"""MODIFY the existing swimmer plot code — do NOT regenerate from scratch.
 
@@ -101,6 +180,8 @@ CURRENT PLOT CONTEXT:
 - Data shape: {ctx['processed_data_shape']}
 - Code length: {len(ctx['code'])} characters
 
+{cols_str}
+
 CURRENT CODE:
 ```python
 {ctx['code']}
@@ -109,12 +190,20 @@ CURRENT CODE:
 USER REQUEST: {user_request}
 
 ═══════════════════════════════════════════════════════════════════
+VARIABLE NAMING CONVENTION
+═══════════════════════════════════════════════════════════════════
+Dataset columns are referenced with the VAR: prefix (e.g. VAR:EOSDY).
+PRE-FLIGHT CHECK ALREADY PASSED: all VAR: columns in this request have been
+confirmed to exist in AVAILABLE COLUMNS — proceed directly with the modification.
+If no VAR: prefix is present, the request is a style/layout change only.
+
+═══════════════════════════════════════════════════════════════════
 MODIFICATION GUIDELINES
 ═══════════════════════════════════════════════════════════════════
 ALLOWED:
 • Colors, sizes, borders, symbols, opacity
 • Hover info, annotations, title/labels, legend
-• Add new go.Scatter() overlay traces
+• Add new go.Scatter() overlay traces (ONLY using columns from AVAILABLE COLUMNS)
 • Change layout parameters
 
 FORBIDDEN:
@@ -122,12 +211,10 @@ FORBIDDEN:
 • Change y={y} to numeric indices or y_pos variables
 • Remove subjects from the plot
 • Regenerate the entire code
+• Use variables NOT listed in AVAILABLE COLUMNS above
+• Generate code with unavailable variables
 
 REVERT requests: restore only the previously changed parameter; leave everything else.
-
-DERIVE + OVERLAY requests: tell the user:
-  "Variable derivation must be done in the data customization step first.
-   Once [variable] exists in the dataset, I can overlay it here."
 
 Return the COMPLETE modified code with all traces intact:"""
 
@@ -145,14 +232,4 @@ Return the COMPLETE modified code with all traces intact:"""
         return self._clean_code(response)
 
     def _clean_code(self, text):
-        if '```python' in text:
-            s = text.find('```python') + 9
-            e = text.find('```', s)
-            if e > s:
-                text = text[s:e].strip()
-        elif '```' in text:
-            s = text.find('```') + 3
-            e = text.find('```', s)
-            if e > s:
-                text = text[s:e].strip()
-        return text.replace('fig.show()', '# fig.show() removed for Shiny integration').strip()
+        return clean_code(text)

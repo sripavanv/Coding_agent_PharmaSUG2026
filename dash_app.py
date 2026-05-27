@@ -73,299 +73,379 @@ generator = SwimmerPlotGenerator()
 # =============================================================================
 
 # Header
-header = dbc.Navbar(
-    dbc.Container([
-        html.H2("Clinical Trials Swimmer Plot Generator", className="text-white mb-0"),
-    ]),
-    color="primary",
-    dark=True,
-    className="mb-3"
+# ── Shared style tokens ───────────────────────────────────────────────────────
+CARD_STYLE   = {'border': '1px solid #e0e4ea', 'borderRadius': '8px', 'backgroundColor': '#fff'}
+SECTION_HEAD = {'fontSize': '11px', 'fontWeight': '600', 'color': '#374151',
+                'textTransform': 'uppercase', 'letterSpacing': '0.06em', 'marginBottom': '10px'}
+LABEL_STYLE  = {'fontSize': '12px', 'color': '#4b5563', 'marginBottom': '4px', 'display': 'block'}
+HINT_STYLE   = {'fontSize': '11px', 'color': '#9ca3af', 'marginTop': '3px', 'marginBottom': '8px'}
+STEP_BADGE   = lambda n, title: html.Div([
+    html.Span(str(n), style={
+        'display': 'inline-flex', 'alignItems': 'center', 'justifyContent': 'center',
+        'width': '22px', 'height': '22px', 'borderRadius': '50%',
+        'backgroundColor': '#2563eb', 'color': '#fff',
+        'fontSize': '11px', 'fontWeight': '700', 'marginRight': '8px', 'flexShrink': '0'
+    }),
+    html.Span(title, style={'fontSize': '13px', 'fontWeight': '600', 'color': '#1e3a5f'})
+], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '12px'})
+
+# ── Custom CSS injected via index_string override ──────────────────────────────
+app.index_string = """
+<!DOCTYPE html>
+<html>
+<head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}
+<style>
+  body { background: #f0f2f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .main-card { background:#fff; border:1px solid #e0e4ea; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+
+  /* Tab pill bar */
+  .pill-tabs .tab-bar { display:flex; gap:6px; padding:8px 12px;
+    background:#f8fafc; border-bottom:1px solid #e0e4ea; border-radius:10px 10px 0 0; flex-wrap:wrap; }
+  .pill-tabs .tab-btn { padding:6px 16px; border-radius:20px; border:1px solid transparent;
+    font-size:12px; font-weight:500; color:#6b7280; background:transparent; cursor:pointer;
+    transition:all .15s; white-space:nowrap; }
+  .pill-tabs .tab-btn:hover { background:#e9eef6; color:#2563eb; }
+  .pill-tabs .tab-btn.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+  .pill-tabs .tab-content { padding:20px; }
+
+  /* Step cards */
+  .step-card { border:1px solid #e5e9f0; border-radius:8px; padding:16px; margin-bottom:14px; background:#fafbfd; }
+  .step-card:last-child { margin-bottom:0; }
+
+  /* Dataset info strip */
+  .ds-strip { display:flex; gap:10px; flex-wrap:wrap; }
+  .ds-chip { background:#f0f4ff; border:1px solid #c7d7f9; border-radius:6px;
+    padding:6px 12px; font-size:11px; color:#1e40af; }
+  .ds-chip strong { font-weight:600; }
+
+  /* Sidebar info box */
+  .info-box { background:#f8fafc; border:1px solid #e0e4ea; border-radius:8px; padding:10px 14px; margin-bottom:12px; }
+
+  /* Dash tab hiding — we control visibility manually */
+  .custom-tab { display:none !important; }
+  .custom-tab.active-tab { display:block !important; }
+  
+  /* Override default Dash tab styles to be invisible */
+  .js-plotly-plot .plotly .cursor-crosshair { cursor: crosshair; }
+</style>
+</head>
+<body>{%app_entry%}
+<footer>{%config%}{%scripts%}{%renderer%}</footer>
+</body>
+</html>
+"""
+
+# ── Header ─────────────────────────────────────────────────────────────────────
+header = html.Div(
+    html.Div([
+        html.Span("⬡", style={'fontSize': '20px', 'color': '#60a5fa', 'marginRight': '10px'}),
+        html.Span("Clinical Trials Swimmer Plot Generator",
+                  style={'fontSize': '16px', 'fontWeight': '700', 'color': '#fff', 'letterSpacing': '0.02em'}),
+        html.Span("CDISC · Oncology", style={
+            'fontSize': '11px', 'color': '#93c5fd', 'marginLeft': '14px',
+            'border': '1px solid #3b82f6', 'borderRadius': '12px', 'padding': '2px 10px'
+        }),
+    ], style={'display': 'flex', 'alignItems': 'center', 'padding': '12px 24px'}),
+    style={'background': 'linear-gradient(90deg,#1e3a5f 0%,#2563eb 100%)',
+           'marginBottom': '16px', 'borderRadius': '0 0 8px 8px', 'boxShadow': '0 2px 8px rgba(37,99,235,.25)'}
 )
 
-# Sidebar — width=2
-sidebar = dbc.Col([
-    html.H6("CDISC Data", className="mb-2", style={'fontSize': '12px'}),
 
-    dbc.Card([
-        dbc.CardBody([
-            html.P("ADSL", className="text-primary mb-1", style={'fontSize': '11px', 'fontWeight': 'bold'}),
-            html.P([
-                html.Strong("Rows: ", style={'fontSize': '10px'}), html.Span(f"{len(ADSL_DATA):,}", style={'fontSize': '10px'}),
-                html.Br(),
-                html.Strong("Vars: ", style={'fontSize': '10px'}), html.Span(f"{len(ADSL_DATA.columns):,}", style={'fontSize': '10px'})
-            ], className="mb-0")
-        ], style={'padding': '6px'})
-    ], className="mb-1"),
 
-    dbc.Card([
-        dbc.CardBody([
-            html.P("ADRS", className="text-primary mb-1", style={'fontSize': '11px', 'fontWeight': 'bold'}),
-            html.P([
-                html.Strong("Rows: ", style={'fontSize': '10px'}), html.Span(f"{len(ADRS_DATA):,}", style={'fontSize': '10px'}),
-                html.Br(),
-                html.Strong("Vars: ", style={'fontSize': '10px'}), html.Span(f"{len(ADRS_DATA.columns):,}", style={'fontSize': '10px'})
-            ], className="mb-0")
-        ], style={'padding': '6px'})
-    ], className="mb-2"),
+# ── Tab contents ───────────────────────────────────────────────────────────────
 
-    html.Hr(style={'margin': '6px 0'}),
+tab_data_prep = html.Div([
 
-    # ── Filter box: ADSL ─────────────────────────────
-    dbc.Card([
-        dbc.CardBody([
-            html.P("Filter ADSL", className="text-secondary mb-1",
-                   style={'fontSize': '10px', 'fontWeight': 'bold'}),
-            dcc.Dropdown(
-                id='adsl-filter-var',
+    # Dataset info bar
+    html.Div([
+        html.Div([
+            html.Span("ADSL", style={'fontWeight': '600', 'color': '#1e40af', 'marginRight': '4px', 'fontSize': '11px'}),
+            html.Span(f"{len(ADSL_DATA):,} rows · {len(ADSL_DATA.columns)} vars", style={'fontSize': '10px', 'color': '#6b7280'}),
+            html.Span("  |  ", style={'color': '#d1d5db', 'fontSize': '10px'}),
+            html.Span("ADRS", style={'fontWeight': '600', 'color': '#1e40af', 'marginRight': '4px', 'fontSize': '11px'}),
+            html.Span(f"{len(ADRS_DATA):,} rows · {len(ADRS_DATA.columns)} vars", style={'fontSize': '10px', 'color': '#6b7280'}),
+        ], style={'marginRight': '16px', 'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '2px'}),
+        html.Div([
+            html.Span("Explore:", style={'fontSize': '10px', 'color': '#6b7280', 'marginRight': '4px', 'whiteSpace': 'nowrap'}),
+            html.Span("ADSL", style={'fontSize': '10px', 'fontWeight': '600', 'color': '#374151', 'marginRight': '3px'}),
+            dcc.Dropdown(id='adsl-filter-var',
                 options=[{'label': c, 'value': c} for c in ADSL_DATA.columns],
-                placeholder="Select variable...",
-                clearable=True,
-                style={'fontSize': '10px'}
-            ),
-            html.Div(id='adsl-filter-values', className="mt-1")
-        ], style={'padding': '6px'})
-    ], className="mb-1"),
-
-    # ── Filter box: ADRS ─────────────────────────────
-    dbc.Card([
-        dbc.CardBody([
-            html.P("Filter ADRS", className="text-secondary mb-1",
-                   style={'fontSize': '10px', 'fontWeight': 'bold'}),
-            dcc.Dropdown(
-                id='adrs-filter-var',
+                placeholder="variable…", clearable=True,
+                style={'fontSize': '10px', 'width': '130px', 'display': 'inline-block', 'marginRight': '6px'}),
+            html.Span("ADRS", style={'fontSize': '10px', 'fontWeight': '600', 'color': '#374151', 'marginRight': '3px'}),
+            dcc.Dropdown(id='adrs-filter-var',
                 options=[{'label': c, 'value': c} for c in ADRS_DATA.columns],
-                placeholder="Select variable...",
-                clearable=True,
-                style={'fontSize': '10px'}
-            ),
-            html.Div(id='adrs-filter-values', className="mt-1")
-        ], style={'padding': '6px'})
-    ], className="mb-2"),
+                placeholder="variable…", clearable=True,
+                style={'fontSize': '10px', 'width': '130px', 'display': 'inline-block'}),
+        ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '2px'}),
+        html.Div(id='dataset-status-sidebar'),
+    ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '8px',
+              'padding': '6px 10px', 'marginBottom': '10px',
+              'background': '#f8fafc', 'border': '1px solid #e5e9f0', 'borderRadius': '6px'}),
+    html.Div([
+        html.Div(id='adsl-filter-values', style={'fontSize': '10px', 'color': '#6b7280'}),
+        html.Div(id='adrs-filter-values', style={'fontSize': '10px', 'color': '#6b7280'}),
+    ], id='explore-results', style={'marginBottom': '8px'}),
 
-    html.Div(id='dataset-status-sidebar')
+    # Step 1
+    html.Div([
+        STEP_BADGE(1, "Data Customization"),
+        html.P("Describe any dataset transformations in plain English (optional).", style=HINT_STYLE),
+        dcc.Textarea(
+            id='data-customization-textarea',
+            placeholder="e.g. derive DURATION as days from STARTDT to ENDDT; left-join ADSL to bring in TRT01P",
+            style={'width': '100%', 'height': '56px', 'fontSize': '12px',
+                   'border': '1px solid #d1d5db', 'borderRadius': '6px', 'resize': 'vertical', 'padding': '8px'},
+            className="mb-2"
+        ),
+        dbc.Row([
+            dbc.Col(dbc.Button("Apply", id='apply-customization-btn', color="primary", size="sm",
+                               className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}), width=3),
+            dbc.Col(dbc.Button("Reset", id='reset-data-btn', outline=True, color="secondary", size="sm",
+                               className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}), width=3),
+        ], className="mb-2"),
+        html.Div(id='customization-status', style={'fontSize': '11px'}),
+        html.Div([
+            html.Span("Dataset Preview", style={'fontSize': '11px', 'fontWeight': '600', 'color': '#374151'}),
+        ], style={'marginTop': '12px', 'marginBottom': '6px'}),
+        html.Div(
+            id='dataset-preview-table',
+            style={'maxHeight': '220px', 'overflowY': 'auto', 'overflowX': 'auto',
+                   'border': '1px solid #e5e9f0', 'borderRadius': '6px', 'padding': '4px'}
+        ),
+    ], className="step-card"),
 
-], width=2, style={
-    'backgroundColor': '#F5F5F5',
-    'padding': '10px',
-    'minHeight': '100vh'
-})
+    # Step 2
+    html.Div([
+        STEP_BADGE(2, "Swimmer Plot Variables"),
+        dbc.Row([
+            dbc.Col([
+                html.Label("Y-axis — subjects", style=LABEL_STYLE),
+                dcc.Dropdown(id='y-variable-dropdown', placeholder="SUBJID / USUBJID",
+                             style={'fontSize': '12px'})
+            ], width=4),
+            dbc.Col([
+                html.Label("X-axis — time", style=LABEL_STYLE),
+                dcc.Dropdown(id='x-variable-dropdown', placeholder="Select time variable",
+                             style={'fontSize': '12px'})
+            ], width=4),
+            dbc.Col([
+                html.Label("HBAR — duration", style=LABEL_STYLE),
+                dcc.Dropdown(id='hbar-variable-dropdown', placeholder="Select duration",
+                             style={'fontSize': '12px'})
+            ], width=4),
+        ], className="mb-3"),
+        html.Label("Additional variables to keep", style=LABEL_STYLE),
+        dcc.Dropdown(id='keep-variables-dropdown',
+                     placeholder="Select additional variables to pass to the graph",
+                     multi=True, className="mb-1", style={'fontSize': '12px'}),
+        html.P("Included in the dataset passed to the graph generator.", style=HINT_STYLE),
+        html.Label("Overlay marker (optional)", style=LABEL_STYLE),
+        dcc.Dropdown(id='overlay-marker-dropdown',
+                     placeholder="Categorical variable — scatter markers at X-axis timepoints",
+                     multi=False, clearable=True, className="mb-1", style={'fontSize': '12px'}),
+        html.P("Character column — one marker per row, coloured by unique values.", style=HINT_STYLE),
+        dbc.Button("Generate Validation Report", id='generate-validation-btn',
+                   color="primary", size="sm",
+                   style={'fontSize': '12px', 'borderRadius': '6px', 'width': '100%', 'marginTop': '4px'}),
+        html.Div(id='validation-report-display', style={'marginTop': '12px'}),
+    ], className="step-card"),
 
-# Main Panel
-main_panel = dbc.Col([
-    # Stores for state management
-    dcc.Store(id='original-data-store', storage_type='memory', data=ADRS_DATA.to_dict('records')),
-    dcc.Store(id='customized-data-store', storage_type='memory', data=ADRS_DATA.to_dict('records')),
-    dcc.Store(id='generated-code-store', storage_type='memory'),
-    dcc.Store(id='validation-report-store', storage_type='memory'),
-    dcc.Store(id='execution-result-store', storage_type='memory'),
+    # Step 3
+    html.Div([
+        STEP_BADGE(3, "Graph Customization"),
+        html.P("Describe visual styling in plain English (optional).", style=HINT_STYLE),
+        dcc.Textarea(
+            id='graph-customization-textarea',
+            placeholder="e.g. colour bars by treatment arm, add end-of-study markers, bold axis labels",
+            style={'width': '100%', 'height': '56px', 'fontSize': '12px',
+                   'border': '1px solid #d1d5db', 'borderRadius': '6px', 'resize': 'vertical', 'padding': '8px'},
+            className="mb-2"
+        ),
+        dbc.Button("Generate Swimmer Plot", id='generate-code-btn',
+                   color="success", size="sm", disabled=True,
+                   style={'fontSize': '12px', 'borderRadius': '6px', 'width': '100%',
+                          'fontWeight': '600', 'letterSpacing': '0.02em'}),
+    ], className="step-card"),
+
+], style={'padding': '4px'})
+
+tab_code = html.Div([
+    html.Div([
+        html.Span("Generated Python Code", style=SECTION_HEAD),
+        html.Div(id='code-display', style={'fontSize': '11px', 'marginBottom': '10px'}),
+        dbc.Row([
+            dbc.Col(dbc.Button("▶  Run", id='execute-code-btn', color="success", size="sm",
+                               className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}), width=2),
+            dbc.Col(dbc.Button("⬇  Save", id='save-code-btn', color="primary", size="sm",
+                               className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}), width=2),
+            dbc.Col(html.Div(id='debug-button-container'), width=3),
+        ], className="mb-2"),
+        html.Div(id='save-code-status', style={'fontSize': '11px'}),
+    ], className="step-card"),
+
+    html.Div([
+        html.Span("Convert to R or SAS", style=SECTION_HEAD),
+        html.P("Auto-saves after conversion.", style=HINT_STYLE),
+        dbc.Row([
+            dbc.Col(dbc.RadioItems(
+                id='conversion-language',
+                options=[{'label': 'R  (plotly · WebGL)', 'value': 'R'},
+                         {'label': 'SAS  (GTL)', 'value': 'SAS'}],
+                value='R', inline=True,
+                style={'fontSize': '12px'}
+            ), width=8),
+            dbc.Col(dbc.Button("Convert", id='convert-code-btn', color="primary", size="sm",
+                               className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}), width=2),
+        ], className="mb-2"),
+        html.Div(id='conversion-status', style={'fontSize': '11px', 'marginBottom': '6px'}),
+        html.Div(id='conversion-notes', style={'fontSize': '11px', 'marginBottom': '6px'}),
+        html.Div(id='converted-code-display', style={'fontSize': '11px'}),
+    ], className="step-card"),
+], style={'padding': '4px'})
+
+tab_results = html.Div([
+    html.Div([
+        html.Span("Execution Status", style=SECTION_HEAD),
+        html.Div(id='execution-status', style={'fontSize': '11px'}),
+    ], className="step-card"),
+    html.Div([
+        html.Span("Swimmer Plot", style=SECTION_HEAD),
+        html.Div(id='swimmer-plot-display'),
+    ], className="step-card"),
+], style={'padding': '4px'})
+
+tab_dialogue = html.Div([
+    html.Div([
+        html.Div(id='conversation-status', style={'fontSize': '11px', 'marginBottom': '10px'}),
+        html.Div([
+            html.Span("💡 ", style={'marginRight': '4px'}),
+            html.Span("Use ", style={'fontSize': '11px'}),
+            html.Code("VAR:columnname", style={'fontSize': '11px', 'backgroundColor': '#f0f4ff',
+                      'padding': '1px 5px', 'borderRadius': '3px', 'color': '#2563eb'}),
+            html.Span(" to reference dataset columns  (e.g. 'overlay VAR:EOSDY as markers')",
+                      style={'fontSize': '11px'}),
+        ], style={'padding': '8px 12px', 'backgroundColor': '#eff6ff', 'borderRadius': '6px',
+                  'border': '1px solid #bfdbfe', 'marginBottom': '10px'}),
+        html.Div(id='dialogue-history', style={
+            'height': '320px', 'overflowY': 'auto',
+            'border': '1px solid #e5e9f0', 'borderRadius': '8px',
+            'padding': '10px', 'background': '#fafbfd',
+            'marginBottom': '10px', 'fontSize': '11px'
+        }),
+        dbc.Row([
+            dbc.Col(dcc.Textarea(
+                id='dialogue-input',
+                placeholder="Describe a change… (e.g. 'make bars teal, overlay VAR:EOSDY as triangles')",
+                style={'width': '100%', 'height': '60px', 'fontSize': '12px',
+                       'border': '1px solid #d1d5db', 'borderRadius': '6px', 'padding': '8px'},
+            ), width=9),
+            dbc.Col([
+                dbc.Button("Send", id='send-dialogue-btn', color="primary", size="sm",
+                           className="w-100 mb-2", style={'fontSize': '12px', 'borderRadius': '6px'}),
+                dbc.Button("Clear", id='clear-dialogue-btn', outline=True, color="secondary", size="sm",
+                           className="w-100", style={'fontSize': '12px', 'borderRadius': '6px'}),
+            ], width=3),
+        ]),
+    ], className="step-card"),
+], style={'padding': '4px'})
+
+# ── Main panel (full width, no sidebar) ───────────────────────────────────────
+main_panel = html.Div([
+    # Hidden stores
+    dcc.Store(id='original-data-store',      storage_type='memory', data=ADRS_DATA.to_dict('records')),
+    dcc.Store(id='customized-data-store',    storage_type='memory', data=ADRS_DATA.to_dict('records')),
+    dcc.Store(id='generated-code-store',     storage_type='memory'),
+    dcc.Store(id='validation-report-store',  storage_type='memory'),
+    dcc.Store(id='execution-result-store',   storage_type='memory'),
     dcc.Store(id='conversation-history-store', storage_type='memory', data=[]),
-    dcc.Store(id='converted-code-store', storage_type='memory'),
+    dcc.Store(id='converted-code-store',     storage_type='memory'),
+    dcc.Store(id='active-tab-store',         storage_type='memory', data='data-tab'),
 
-    # Global spinner — visible whenever any long operation is running
-    dcc.Loading(
-        id="global-spinner",
-        type="circle",
-        color="#0d6efd",
-        fullscreen=True,
-        style={"backgroundColor": "rgba(255,255,255,0.6)"},
-        children=html.Div(id="spinner-trigger", style={"display": "none"})
-    ),
+    dcc.Loading(id="global-spinner", type="circle", color="#2563eb", fullscreen=True,
+                style={"backgroundColor": "rgba(255,255,255,0.7)"},
+                children=html.Div(id="spinner-trigger", style={"display": "none"})),
 
-    # Main content area with tabs
-    dcc.Tabs(id='main-tabs', value='data-tab', children=[
-        dcc.Tab(label='Data Preparation', value='data-tab', children=[
-            html.Div([
-                html.H6("Step 1: Data Customization (Optional)", className="mb-2 mt-2", style={'fontSize': '13px'}),
+    # Tab pill bar + content card
+    html.Div([
+        # Pill tab bar
+        html.Div([
+            html.Button("Data Preparation",      id='tab-btn-data',     n_clicks=0,
+                        className="tab-btn active", **{'data-tab': 'data-tab'}),
+            html.Button("Generated Code",         id='tab-btn-code',     n_clicks=0,
+                        className="tab-btn",        **{'data-tab': 'code-tab'}),
+            html.Button("Swimmer Plot Results",   id='tab-btn-results',  n_clicks=0,
+                        className="tab-btn",        **{'data-tab': 'results-tab'}),
+            html.Button("Interactive Customization", id='tab-btn-dialogue', n_clicks=0,
+                        className="tab-btn",        **{'data-tab': 'dialogue-tab'}),
+        ], className="tab-bar"),
 
-                dcc.Textarea(
-                    id='data-customization-textarea',
-                    placeholder="Optional data transformations",
-                    style={'width': '100%', 'height': '50px', 'fontSize': '12px'},
-                    className="form-control mb-2"
-                ),
-
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Button("Apply", id='apply-customization-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=6),
-                    dbc.Col([
-                        dbc.Button("Reset", id='reset-data-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=6)
-                ], className="mb-2"),
-
-                html.Div(id='customization-status', style={'fontSize': '11px'}),
-
-                html.Hr(),
-
-                html.P("Dataset Preview:", className="mb-2", style={'fontSize': '12px', 'fontWeight': 'bold'}),
-                html.Div(id='dataset-preview-table'),
-
-                html.Hr(),
-
-                html.H6("Step 2: Swimmer Plot Variables", className="mb-2", style={'fontSize': '13px'}),
-
-                dbc.Row([
-                    dbc.Col([
-                        html.Label("Y-axis (Subjects):", style={'fontSize': '12px'}),
-                        dcc.Dropdown(id='y-variable-dropdown', placeholder="Select subject ID...", className="mb-2", style={'fontSize': '12px'})
-                    ], width=4),
-                    dbc.Col([
-                        html.Label("X-axis (Time):", style={'fontSize': '12px'}),
-                        dcc.Dropdown(id='x-variable-dropdown', placeholder="Select time...", className="mb-2", style={'fontSize': '12px'})
-                    ], width=4),
-                    dbc.Col([
-                        html.Label("HBAR Duration:", style={'fontSize': '12px'}),
-                        dcc.Dropdown(id='hbar-variable-dropdown', placeholder="Select duration...", className="mb-2", style={'fontSize': '12px'})
-                    ], width=4)
-                ]),
-
-                html.Label("Additional Variables to Keep:", style={'fontSize': '12px', 'marginTop': '5px'}),
-                dcc.Dropdown(
-                    id='keep-variables-dropdown',
-                    placeholder="Select additional variables for unique dataset",
-                    multi=True,
-                    className="mb-2",
-                    style={'fontSize': '12px'}
-                ),
-                html.P("These variables will be included in the unique dataset passed to the graph",
-                       style={'fontSize': '11px', 'color': '#6c757d', 'marginBottom': '10px'}),
-
-                html.Label("Overlay Marker (Optional):", style={'fontSize': '12px', 'marginTop': '2px'}),
-                dcc.Dropdown(
-                    id='overlay-marker-dropdown',
-                    placeholder="Select overlay variable (scatter on X-axis timepoints)...",
-                    multi=False,
-                    clearable=True,
-                    className="mb-1",
-                    style={'fontSize': '12px'}
-                ),
-                html.P(
-                    "Character string variable — plotted as scatter markers at X-axis timepoints, aligned to Y-axis subjects.",
-                    style={'fontSize': '11px', 'color': '#6c757d', 'marginBottom': '10px'}
-                ),
-
-                dbc.Button("Generate Validation Report", id='generate-validation-btn', color="primary", size="sm", className="w-100 mb-2", style={'fontSize': '12px'}),
-
-                html.Div(id='validation-report-display'),
-
-                html.Hr(),
-
-                html.H6("Step 3: Graph Customization (Optional)", className="mb-2", style={'fontSize': '13px'}),
-                dcc.Textarea(
-                    id='graph-customization-textarea',
-                    placeholder="Visual styling (optional)",
-                    style={'width': '100%', 'height': '50px', 'fontSize': '12px'},
-                    className="form-control mb-2"
-                ),
-
-                dbc.Button("Generate Swimmer Plot", id='generate-code-btn', color="primary", size="sm", className="w-100", disabled=True, style={'fontSize': '12px'}),
-
-            ], style={'padding': '20px'})
+        # Hidden dcc.Tabs for callback compatibility
+        dcc.Tabs(id='main-tabs', value='data-tab', style={'display': 'none'}, children=[
+            dcc.Tab(label='Data Preparation',        value='data-tab'),
+            dcc.Tab(label='Generated Code',          value='code-tab'),
+            dcc.Tab(label='Swimmer Plot Results',    value='results-tab'),
+            dcc.Tab(label='Interactive Customization', value='dialogue-tab'),
         ]),
 
-        dcc.Tab(label='Generated Code', value='code-tab', children=[
-            html.Div([
-                html.H6("Generated Code", className="mt-2 mb-2", style={'fontSize': '13px'}),
-                html.Div(id='code-display', style={'fontSize': '11px'}),
-                html.Hr(),
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Button("Run Code", id='execute-code-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=3),
-                    dbc.Col([
-                        dbc.Button("Save Code", id='save-code-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=3),
-                    dbc.Col([
-                        html.Div(id='debug-button-container')
-                    ], width=3)
-                ])
-            ], style={'padding': '15px'})
-        ]),
+        # Tab content panels
+        html.Div([
+            html.Div(tab_data_prep,  id='panel-data-tab',    style={'display': 'block'}),
+            html.Div(tab_code,       id='panel-code-tab',    style={'display': 'none'}),
+            html.Div(tab_results,    id='panel-results-tab', style={'display': 'none'}),
+            html.Div(tab_dialogue,   id='panel-dialogue-tab',style={'display': 'none'}),
+        ], className="tab-content"),
 
-        dcc.Tab(label='Swimmer Plot Results', value='results-tab', children=[
-            html.Div([
-                html.H6("Execution Results", className="mt-2 mb-2", style={'fontSize': '13px'}),
-                html.Div(id='execution-status', style={'fontSize': '11px'}),
-                html.Hr(),
-                html.P("Generated Swimmer Plot:", className="mb-2", style={'fontSize': '12px', 'fontWeight': 'bold'}),
-                html.Div(id='swimmer-plot-display')
-            ], style={'padding': '15px'})
-        ]),
+    ], className="main-card pill-tabs"),
 
-        dcc.Tab(label='Interactive Customization', value='dialogue-tab', children=[
-            html.Div([
-                html.H6("AI Dialogue for Plot Customization", className="mt-2 mb-2", style={'fontSize': '13px'}),
-                html.Div(id='conversation-status', className="mt-2 mb-2", style={'fontSize': '11px'}),
-
-                html.Div(id='dialogue-history', style={
-                    'height': '300px',
-                    'overflowY': 'auto',
-                    'border': '1px solid #dee2e6',
-                    'borderRadius': '8px',
-                    'padding': '10px',
-                    'background': '#fafafa',
-                    'marginBottom': '10px',
-                    'fontSize': '11px'
-                }),
-
-                dbc.Row([
-                    dbc.Col([
-                        dcc.Textarea(
-                            id='dialogue-input',
-                            placeholder="Tell me how to customize your plot...",
-                            style={'width': '100%', 'height': '60px', 'fontSize': '12px'},
-                            className="form-control"
-                        )
-                    ], width=10),
-                    dbc.Col([
-                        dbc.Button("Send Request", id='send-dialogue-btn', color="primary", size="sm", className="w-100 mb-2", style={'fontSize': '12px'}),
-                        dbc.Button("Clear History", id='clear-dialogue-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=3)
-                ])
-            ], style={'padding': '15px'})
-        ]),
-
-        dcc.Tab(label='Code Conversion', value='conversion-tab', children=[
-            html.Div([
-                html.H6("Convert Python Code to R or SAS", className="mt-2 mb-2", style={'fontSize': '13px'}),
-                html.P("Convert to R (ggplot2/plotly) or SAS (GTL).", style={'fontSize': '11px'}),
-
-                dbc.Row([
-                    dbc.Col([
-                        dbc.RadioItems(
-                            id='conversion-language',
-                            options=[
-                                {'label': 'R (using ggplot2 + plotly)', 'value': 'R'},
-                                {'label': 'SAS (using GTL - Graph Template Language)', 'value': 'SAS'}
-                            ],
-                            value='R',
-                            className="mb-2",
-                            style={'fontSize': '12px'}
-                        )
-                    ], width=6),
-                    dbc.Col([
-                        dbc.Button("Convert Code", id='convert-code-btn', color="primary", size="sm", className="w-100 mb-2", style={'fontSize': '12px'}),
-                        dbc.Button("Save Converted Code", id='save-converted-code-btn', color="primary", size="sm", className="w-100", style={'fontSize': '12px'})
-                    ], width=6)
-                ]),
-
-                html.Div(id='conversion-status', className="mt-2 mb-2", style={'fontSize': '11px'}),
-                html.Div(id='converted-code-display', style={'fontSize': '11px'}),
-                html.Div(id='conversion-notes', className="mt-2", style={'fontSize': '11px'})
-            ], style={'padding': '15px'})
-        ])
-    ])
-], width=9)
+], style={'padding': '0 16px 24px'})
 
 # App Layout
-app.layout = dbc.Container([
+app.layout = html.Div([
     header,
-    dbc.Row([sidebar, main_panel])
-], fluid=True)
+    main_panel,
+])
 
 # =============================================================================
 # CALLBACKS
 # =============================================================================
+
+# ── Tab switching — pure Python, no clientside callbacks ──────────────────────
+@callback(
+    [Output('active-tab-store',  'data'),
+     Output('panel-data-tab',    'style'),
+     Output('panel-code-tab',    'style'),
+     Output('panel-results-tab', 'style'),
+     Output('panel-dialogue-tab','style'),
+     Output('tab-btn-data',      'className'),
+     Output('tab-btn-code',      'className'),
+     Output('tab-btn-results',   'className'),
+     Output('tab-btn-dialogue',  'className')],
+    [Input('tab-btn-data',     'n_clicks'),
+     Input('tab-btn-code',     'n_clicks'),
+     Input('tab-btn-results',  'n_clicks'),
+     Input('tab-btn-dialogue', 'n_clicks'),
+     Input('active-tab-store', 'data')],
+    prevent_initial_call=False,
+)
+def switch_tab(n_data, n_code, n_results, n_dialogue, current_tab):
+    """Switch visible panel and highlight the active pill button."""
+    from dash import ctx
+    btn_map = {
+        'tab-btn-data':     'data-tab',
+        'tab-btn-code':     'code-tab',
+        'tab-btn-results':  'results-tab',
+        'tab-btn-dialogue': 'dialogue-tab',
+    }
+    if ctx.triggered_id in btn_map:
+        tab = btn_map[ctx.triggered_id]
+    else:
+        tab = current_tab or 'data-tab'
+
+    ids    = ['data-tab', 'code-tab', 'results-tab', 'dialogue-tab']
+    panels = [{'display': 'block'} if t == tab else {'display': 'none'} for t in ids]
+    btns   = ['tab-btn active' if t == tab else 'tab-btn' for t in ids]
+    return [tab] + panels + btns
 
 # Update variable dropdowns when customized data changes
 @callback(
@@ -456,7 +536,7 @@ def apply_customization(n_clicks, customization_text, original_data):
                     bordered=True,
                     hover=True,
                     size='sm',
-                    style={'fontSize': '10px', 'overflowX': 'auto'}
+                    style={'fontSize': '10px', 'marginBottom': '0'}
                 ),
                 html.P(f"Showing 10 of {len(processed_df)} rows — includes all original, merged, and derived columns.",
                        style={'fontSize': '11px', 'color': '#6c757d', 'marginTop': '5px'})
@@ -480,11 +560,16 @@ def apply_customization(n_clicks, customization_text, original_data):
     prevent_initial_call=True
 )
 def reset_to_original(n_clicks, original_data):
-    """Reset to original dataset"""
+    """Reset to original dataset (only affects Step 1 data customization)"""
     if n_clicks is None:
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-    return original_data, "", dbc.Alert("Reset to original dataset", color="info"), html.Div()
+    return (
+        original_data,
+        "",
+        dbc.Alert("✅ Reset to original dataset", color="success"),
+        html.Div()
+    )
 
 # Generate validation report
 @callback(
@@ -514,26 +599,25 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
 
     df = pd.DataFrame(customized_data)
 
-    # Create the keep columns list (required + additional selected by user)
+    # Create the keep columns list
     keep_columns = [y_var, x_var, hbar_var]
     if keep_vars:
         keep_columns.extend(keep_vars)
     keep_columns = list(dict.fromkeys(keep_columns))
 
-    # Also retain any derived columns that exist in df but were not in the
-    # original ADRS schema — these were created by the data customizer and
-    # must survive so the user can see and select them in the dropdowns.
+    # Automatically include any derived columns (columns not in original ADRS)
     original_adrs_cols = set(ADRS_DATA.columns)
     derived_cols = [c for c in df.columns
                     if c not in original_adrs_cols and c not in keep_columns]
+
+    # Final columns = selected + derived
     final_columns = keep_columns + derived_cols
 
-    # Perform unique operation on the dataset
-    original_len = len(df)
-    unique_df = df[final_columns].drop_duplicates()
+    # Filter to selected columns only — row structure preserved intact for AI code generation
+    unique_df = df[final_columns]
     unique_len = len(unique_df)
 
-    print(f"Dataset after unique: {original_len} -> {unique_len} rows, keeping columns: {keep_columns}")
+    print(f"Dataset filtered: {unique_len} rows × {len(final_columns)} columns, keeping: {keep_columns}")
 
     # ── Run data_validator standards checks against the processed data ──────────
     validation = generator.data_validator.validate_all(
@@ -543,6 +627,21 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
     errors       = validation["errors"]
     warnings     = validation["warnings"]
 
+    # ── Run individual validation checks for detailed reporting ──────────────────
+    check_results = []
+
+    # Check 1: All required variables selected
+    vars_ok, vars_missing = generator.data_validator.validate_variables_specified(x_var, y_var, hbar_var)
+    check_results.append(("All required variables selected", vars_ok, None))
+
+    # Check 2: X-axis is numeric/linear
+    x_ok, x_type = generator.data_validator.validate_x_axis_numeric(unique_df, x_var)
+    check_results.append(("X-axis is numeric/linear", x_ok, f"Type: {x_type}" if x_ok else None))
+
+    # Check 3: HBAR is numeric
+    hbar_ok, hbar_type = generator.data_validator.validate_hbar_numeric(unique_df, hbar_var)
+    check_results.append(("HBAR is numeric", hbar_ok, f"Type: {hbar_type}" if hbar_ok else None))
+
     # ── Get derivation metadata from customizer ────────────────────────────────
     report = generator.get_validation_report(x_var, y_var, hbar_var, unique_df)
 
@@ -551,7 +650,7 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
     # Section 1 — data summary
     data_summary = html.Div([
         html.Strong("Data Summary:", style={'fontSize': '12px'}),
-        html.P(f"Original Records: {original_len:,} → Unique Records: {unique_len:,}", style={'fontSize': '11px'}),
+        html.P(f"Records: {unique_len:,} rows × {len(final_columns)} columns", style={'fontSize': '11px'}),
         html.P(f"Unique Subjects: {unique_df[y_var].nunique() if y_var in unique_df.columns else 'N/A'}", style={'fontSize': '11px'}),
         html.P(f"Columns in plot dataset: {', '.join(final_columns)}", style={'fontSize': '11px'})
     ], className="mb-2")
@@ -566,17 +665,29 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
         ])
     ], className="mb-2")
 
-    # Section 3 — standards checks (errors + warnings)
+    # Section 3 — detailed validation checks
+    checks_list = []
+    for check_name, passed, detail in check_results:
+        icon = "✅" if passed else "❌"
+        color = "#198754" if passed else "#dc3545"
+        check_text = f"{icon} {check_name}"
+        if detail and passed:
+            check_text += f" ({detail})"
+        checks_list.append(html.Li(check_text, style={'fontSize': '11px', 'color': color}))
+
+    checks_block = html.Div([
+        html.Strong("Validation Checks:", style={'fontSize': '12px', 'marginBottom': '5px'}),
+        html.Ul(checks_list, style={'marginBottom': '0'})
+    ], className="mb-2")
+
+    # Section 4 — standards violations (errors) if any
     if errors:
         error_block = html.Div([
             html.Strong("❌ Standards Violations — must fix before generating:", style={'fontSize': '12px', 'color': '#dc3545'}),
             html.Ul([html.Li(e, style={'fontSize': '11px', 'color': '#dc3545'}) for e in errors])
         ], className="mb-2")
     else:
-        error_block = html.Div(
-            "✅ All standards checks passed.",
-            style={'fontSize': '11px', 'color': '#198754', 'marginBottom': '8px'}
-        )
+        error_block = html.Div()
 
     if warnings:
         warning_block = html.Div([
@@ -617,46 +728,48 @@ def generate_validation_report(n_clicks, customized_data, y_var, x_var, hbar_var
             html.H6(header_text, className=f"text-{header_color} mb-2", style={'fontSize': '13px'}),
             data_summary,
             var_summary,
+            checks_block,
             error_block,
             warning_block,
             action_row
         ], style={'padding': '10px'})
     ], color="light", className="mb-2")
 
-    # Enable Generate button only if no standards errors
-    return report_display, report, has_errors, unique_df.to_dict('records')
+    # Always disable Generate button after validation — user must click Approve & Continue
+    return report_display, report, True, unique_df.to_dict('records')
 
 # Handle approval — button already enabled by validate step if no errors
-# This callback just gives visual confirmation
+# Approval enables the Generate Swimmer Plot button
 @callback(
-    Output('validation-report-display', 'children', allow_duplicate=True),
+    [Output('validation-report-display', 'children', allow_duplicate=True),
+     Output('generate-code-btn', 'disabled', allow_duplicate=True)],
     Input('approve-variables-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def approve_variables(n_clicks):
-    """User confirms approval"""
+    """User confirms approval — unlock Generate Swimmer Plot button"""
     if n_clicks is None:
-        return dash.no_update
-    return dbc.Alert("✅ Approved — Generate Swimmer Plot is ready.", color="success")
+        return dash.no_update, dash.no_update
+    return dbc.Alert("✅ Approved — Generate Swimmer Plot is ready.", color="success"), False
 
-# Handle edit
+# Handle edit — also re-disable Generate button so user must re-approve
 @callback(
-    Output('validation-report-display', 'children', allow_duplicate=True),
+    [Output('validation-report-display', 'children', allow_duplicate=True),
+     Output('generate-code-btn', 'disabled', allow_duplicate=True)],
     Input('edit-variables-btn', 'n_clicks'),
     prevent_initial_call=True
 )
 def edit_variables(n_clicks):
-    """User wants to edit variables"""
+    """User wants to edit variables — lock Generate button until re-approved"""
     if n_clicks is None:
-        return dash.no_update
-
-    return html.Div("Please adjust your variable selections above", style={'color': 'blue'})
+        return dash.no_update, dash.no_update
+    return html.Div("Please adjust your variable selections above", style={'color': 'blue'}), True
 
 # Generate code
 @callback(
     [Output('generated-code-store', 'data'),
      Output('code-display', 'children'),
-     Output('main-tabs', 'value'),
+     Output('active-tab-store', 'data', allow_duplicate=True),
      Output('spinner-trigger', 'children', allow_duplicate=True)],
     Input('generate-code-btn', 'n_clicks'),
     [State('customized-data-store', 'data'),
@@ -691,7 +804,8 @@ def generate_code(n_clicks, customized_data, y_var, x_var, hbar_var, graph_custo
             x_var, y_var, hbar_var,
             data_customization="",  # Empty since data is already customized
             graph_customization=graph_custom_full,
-            sample_data=df
+            sample_data=df,
+            adsl_data=ADSL_DATA,
         )
 
         code_display = html.Div([
@@ -716,7 +830,7 @@ def generate_code(n_clicks, customized_data, y_var, x_var, hbar_var, graph_custo
     [Output('execution-result-store', 'data'),
      Output('execution-status', 'children'),
      Output('swimmer-plot-display', 'children'),
-     Output('main-tabs', 'value', allow_duplicate=True)],
+     Output('active-tab-store', 'data', allow_duplicate=True)],
     Input('execute-code-btn', 'n_clicks'),
     [State('generated-code-store', 'data'),
      State('customized-data-store', 'data')],
@@ -807,20 +921,22 @@ def debug_code(n_clicks, failed_code, execution_result, customized_data, y_var, 
         error_display = dbc.Alert(f"Debug error: {str(e)}", color="danger")
         return dash.no_update, error_display, dash.no_update
 
-# Save code
+# Save code — status shown inline in Generated Code tab
 @callback(
-    Output('customization-status', 'children', allow_duplicate=True),
+    Output('save-code-status', 'children'),
     Input('save-code-btn', 'n_clicks'),
     State('generated-code-store', 'data'),
     prevent_initial_call=True
 )
 def save_code(n_clicks, code):
-    """Save generated code to file"""
+    """Auto-save generated Python code and show status inline"""
     if n_clicks is None or not code:
         return dash.no_update
-
-    result = generator.save_code(code)
-    return dbc.Alert(f"Code saved: {result}", color="success")
+    try:
+        result = generator.save_code(code)
+        return dbc.Alert(f"✅ Saved: {result}", color="success", duration=4000)
+    except Exception as e:
+        return dbc.Alert(f"Save error: {str(e)}", color="danger")
 
 # Interactive dialogue - send message
 @callback(
@@ -855,7 +971,27 @@ def send_dialogue(n_clicks, user_input, generated_code, conversation_history):
         # Get updated conversation history
         current_history = generator.get_conversation_history()
 
-        # Update code display
+        # Pre-flight check flagged a missing VAR: prefix or unavailable column
+        if status == "action_required":
+            msg = info[0] if info else "Please revise your request."
+            code_display = html.Div([
+                dbc.Alert([
+                    html.Strong("⚠ Action Required — "),
+                    html.Span(msg)
+                ], color="warning", className="mb-3"),
+                html.H6("Current Code (unchanged):"),
+                html.Pre(customized_code, style={
+                    'backgroundColor': '#F5F5F5',
+                    'padding': '15px',
+                    'borderRadius': '5px',
+                    'maxHeight': '500px',
+                    'overflowY': 'auto'
+                })
+            ])
+            # Keep original code — don't overwrite store
+            return current_history, "", dash.no_update, code_display, dash.no_update
+
+        # Normal success path
         code_display = html.Div([
             dbc.Alert("Code customized by AI. You can run it or make further changes.", color="success", className="mb-3"),
             html.H6("Customized Swimmer Plot Code:"),
@@ -962,7 +1098,7 @@ def update_dialogue_history(conversation_history):
 
     return html.Div(messages)
 
-# Code conversion - convert code
+# Code conversion — auto-saves after conversion
 @callback(
     [Output('converted-code-display', 'children'),
      Output('conversion-status', 'children'),
@@ -974,22 +1110,22 @@ def update_dialogue_history(conversation_history):
     prevent_initial_call=True
 )
 def convert_code(n_clicks, python_code, target_language):
-    """Convert Python code to R or SAS"""
+    """Convert Python code to R or SAS and auto-save"""
     if n_clicks is None:
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     if not python_code:
         return (
-            html.Div(f"No {target_language} code generated yet.", style={'color': 'gray', 'fontStyle': 'italic', 'padding': '20px'}),
-            dbc.Alert("No Python code available for conversion. Generate a swimmer plot first.", color="warning"),
+            html.Div(),
+            dbc.Alert("No Python code available. Generate a swimmer plot first.", color="warning"),
             html.Div(),
             None
         )
 
     if not generator.ai_enabled:
         return (
-            html.Div(f"AI not available", style={'color': 'gray', 'fontStyle': 'italic', 'padding': '20px'}),
-            dbc.Alert("AI not available for code conversion. Check ANTHROPIC_API_KEY.", color="danger"),
+            html.Div(),
+            dbc.Alert("AI not available. Check ANTHROPIC_API_KEY.", color="danger"),
             html.Div(),
             None
         )
@@ -997,71 +1133,59 @@ def convert_code(n_clicks, python_code, target_language):
     print(f"Converting Python code to {target_language}...")
 
     try:
-        # Use generator's code conversion method
         converted, status, notes = generator.convert_code_to_language(python_code, target_language)
 
         if status == "success":
+            # Auto-save
+            try:
+                saved_as = generator.save_converted_code(converted, target_language)
+                save_msg = f" Auto-saved: {saved_as}"
+            except Exception as se:
+                save_msg = f" (save failed: {se})"
+
+            status_alert = dbc.Alert(
+                f"✅ Converted to {target_language}.{save_msg}",
+                color="success", duration=6000
+            )
+
+            notes_display = html.Div()
+            if notes:
+                notes_display = html.Div([
+                    html.Strong(f"{target_language} notes:", style={'fontSize': '11px'}),
+                    html.Ul([html.Li(n, style={'fontSize': '11px'}) for n in notes])
+                ], style={'background': '#f8f9fa', 'padding': '10px', 'borderRadius': '6px', 'marginBottom': '8px'})
+
             code_display = html.Div([
-                html.H6(f"Generated {target_language} Code:"),
+                html.H6(f"{target_language} Code:", style={'fontSize': '12px'}),
                 html.Pre(converted, style={
                     'backgroundColor': '#F5F5F5',
-                    'padding': '15px',
+                    'padding': '12px',
                     'borderRadius': '5px',
-                    'maxHeight': '500px',
+                    'maxHeight': '400px',
                     'overflowY': 'auto',
-                    'border': '1px solid #dee2e6'
+                    'overflowX': 'auto',
+                    'border': '1px solid #dee2e6',
+                    'fontSize': '11px',
                 })
             ])
-
-            status_alert = dbc.Alert(f"Successfully converted to {target_language}", color="success")
-
-            # Display notes
-            if notes:
-                notes_list = html.Ul([html.Li(note) for note in notes])
-                notes_display = html.Div([
-                    html.Strong(f"{target_language} Conversion Notes:"),
-                    notes_list
-                ], style={'background': '#f8f9fa', 'padding': '15px', 'borderRadius': '8px'})
-            else:
-                notes_display = html.Div()
 
             return code_display, status_alert, notes_display, converted
 
         else:
-            code_display = html.Div([
-                html.H6(f"Conversion Failed:"),
-                html.Pre(converted, style={'color': 'red'})
-            ])
-            status_alert = dbc.Alert(f"Conversion to {target_language} failed", color="danger")
-            return code_display, status_alert, html.Div(), None
+            return (
+                html.Pre(converted, style={'color': 'red', 'fontSize': '11px'}),
+                dbc.Alert(f"Conversion to {target_language} failed.", color="danger"),
+                html.Div(),
+                None
+            )
 
     except Exception as e:
-        error_msg = f"Conversion error: {str(e)}"
         return (
-            html.Div(f"# Error: {error_msg}", style={'color': 'red', 'padding': '20px'}),
-            dbc.Alert("Conversion failed due to unexpected error", color="danger"),
+            html.Div(),
+            dbc.Alert(f"Conversion error: {str(e)}", color="danger"),
             html.Div(),
             None
         )
-
-# Save converted code
-@callback(
-    Output('conversion-status', 'children', allow_duplicate=True),
-    Input('save-converted-code-btn', 'n_clicks'),
-    [State('converted-code-store', 'data'),
-     State('conversion-language', 'value')],
-    prevent_initial_call=True
-)
-def save_converted_code(n_clicks, converted_code, language):
-    """Save converted code to file"""
-    if n_clicks is None or not converted_code:
-        return dash.no_update
-
-    try:
-        result = generator.save_converted_code(converted_code, language)
-        return dbc.Alert(f"Code saved: {result}", color="success")
-    except Exception as e:
-        return dbc.Alert(f"Save error: {str(e)}", color="danger")
 
 
 # ── Sidebar filter: show unique values for ADSL variable ────────────────────

@@ -28,8 +28,6 @@ class SwimmerPlotGenerator:
         self.claude_client = None
         self.ai_enabled = False
         self._current_processed_data = None
-        self._adsl_data   = None   # set by caller before generate_swimmer_code if adsl needed
-        self._keep_columns = None  # set by caller before generate_swimmer_code
 
         if CLAUDE_AVAILABLE:
             api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -52,7 +50,7 @@ class SwimmerPlotGenerator:
 
     # ── Main pipeline ──────────────────────────────────────────────────────────
 
-    def generate_swimmer_code(self, x_var, y_var, hbar_var, data_customization, graph_customization, sample_data):
+    def generate_swimmer_code(self, x_var, y_var, hbar_var, data_customization, graph_customization, sample_data, adsl_data=None):
         """Generate swimmer plot code with two-step AI customization (data then graph)"""
         print(f"\n=== SWIMMER PLOT GENERATION ===")
         print(f"Variables: X={x_var}, Y={y_var}, HBAR={hbar_var}")
@@ -76,8 +74,7 @@ class SwimmerPlotGenerator:
         processed_data = (
             self.data_customizer.apply_data_customizations(
                 sample_data, data_customization, x_var, y_var, hbar_var,
-                adsl_data=getattr(self, '_adsl_data', None),
-                keep_columns=getattr(self, '_keep_columns', None),
+                adsl_data=adsl_data,
             )
             if data_customization and data_customization.strip()
             else sample_data
@@ -92,8 +89,9 @@ class SwimmerPlotGenerator:
         )
         print(f"Generated {len(code)} characters of swimmer plot code")
 
-        # Step 4: Seed customizer context
-        self.graph_customizer.set_plot_context(code, x_var, y_var, hbar_var, processed_data.shape)
+        # Step 4: Seed customizer context with available columns
+        available_columns = list(processed_data.columns)
+        self.graph_customizer.set_plot_context(code, x_var, y_var, hbar_var, processed_data.shape, available_columns)
 
         info = [
             f"Y-axis: {y_var} (categorical - subjects)",
@@ -129,8 +127,6 @@ class SwimmerPlotGenerator:
     def get_validation_report(self, x_var, y_var, hbar_var, processed_data):
         return self.data_customizer.get_validation_report(x_var, y_var, hbar_var, processed_data)
 
-    def filter_data_to_plot_variables(self, data, required_vars, additional_vars=None):
-        return self.data_customizer.filter_data_to_plot_variables(data, required_vars, additional_vars)
 
     def execute_code_safely(self, code_content, processed_data):
         return self.graph_generator.execute_code_safely(code_content, processed_data)
@@ -152,5 +148,3 @@ class SwimmerPlotGenerator:
     def derivation_context(self):
         return self.data_customizer.derivation_context
 
-    def _clean_code(self, generated_code):
-        return self.data_customizer._clean_code(generated_code)

@@ -90,13 +90,6 @@ class DataValidator:
         elif hbar_type == "datetime":
             warnings.append(f"HBAR '{hbar_var}' is datetime — will convert to days.")
 
-        # Customization cross-contamination checks
-        if data_customization:
-            from data_customizer import DataCustomizer
-            r = DataCustomizer().validate_data_customization(data_customization)
-            if not r["valid"]:
-                errors.append(f"Data customization contains graph elements: {r['issues']}")
-
         if graph_customization:
             r = self.validate_graph_customization(graph_customization)
             if not r["valid"]:
